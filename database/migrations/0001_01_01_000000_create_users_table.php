@@ -18,6 +18,17 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->rememberToken();
+            //login with google fields
+            $table->string('google_id')->nullable()->unique();
+            $table->text('google_token')->nullable();
+            $table->text('google_refresh_token')->nullable();
+            $table->timestamp('google_token_expires_at')->nullable();
+            //hubspot fields
+            $table->string('hubspot_id')->nullable()->unique();
+            $table->text('hubspot_token')->nullable();
+            $table->text('hubspot_refresh_token')->nullable();
+            $table->timestamp('hubspot_token_expires_at')->nullable();
+
             $table->timestamps();
         });
 
@@ -45,5 +56,6 @@ return new class extends Migration
         Schema::dropIfExists('users');
         Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
+        
     }
 };

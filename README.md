@@ -1,59 +1,205 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# AI Financial Advisor Agent
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+An AI-powered assistant for Financial Advisors that integrates with **Gmail**, **Google Calendar**, and **HubSpot CRM**.  
+The agent provides a ChatGPT-like interface that can **answer questions**, **retrieve context via RAG**, and **take actions autonomously using tool calling and memory**.
 
-## About Laravel
+This project was built as a time-boxed technical challenge and intentionally focuses on **core agent architecture, reasoning, and extensibility**.
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## 🚀 Live Demo
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- **App URL:** https://<your-app-url>
+- **GitHub Repo:** https://github.com/fitra90/laravel-financial-advisor-ai
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+> ⚠️ Note: This app is configured for a **single test user** and uses OAuth test credentials.
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## 🧠 What This Agent Can Do
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### 1. Secure Authentication & Integrations
+- Login with **Google OAuth**
+  - Gmail read/write
+  - Google Calendar read/write
+- Connect a **HubSpot CRM** account via OAuth
+- Secure token storage with refresh handling
 
-## Laravel Sponsors
+---
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### 2. Chat-Based AI Interface
+A ChatGPT-style interface where the user can:
 
-### Premium Partners
+#### Ask questions about clients
+Examples:
+- *“Who mentioned their kid plays baseball?”*
+- *“Why did Greg say he wanted to sell AAPL stock?”*
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+The agent:
+- Retrieves context from **Gmail emails** and **HubSpot contacts & notes**
+- Uses **RAG (Retrieval-Augmented Generation)** with vector search
+- Answers only from available data (no hallucinated CRM facts)
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### 3. RAG (Retrieval-Augmented Generation)
+- Emails and HubSpot records are embedded and stored using **pgvector**
+- Relevant documents are retrieved and injected into the LLM context
+- Sources include:
+  - Gmail message bodies
+  - HubSpot contact notes
 
-## Code of Conduct
+This allows the agent to reason over real historical communication.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+---
 
-## Security Vulnerabilities
+### 4. Action-Oriented AI (Tool Calling)
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+The agent can **take actions**, not just answer questions.
 
-## License
+Implemented tools include:
+- Search HubSpot contacts
+- Send emails via Gmail
+- Create Google Calendar events
+- Store and update long-running tasks
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Example:
+> *“Schedule an appointment with Sara Smith”*
+
+The agent:
+1. Finds the contact
+2. Emails available calendar times
+3. Waits for a response
+4. Follows up or books the event
+5. Logs the interaction in HubSpot
+
+---
+
+### 5. Agent Memory & Ongoing Instructions
+
+Users can give **persistent instructions**, such as:
+- “When someone emails me that is not in HubSpot, create a contact.”
+- “When I add a calendar event, email the attendees.”
+
+These instructions are:
+- Stored in the database
+- Included in every agent reasoning cycle
+- Applied proactively when new events occur
+
+---
+
+### 6. Proactive Automation
+
+The agent is triggered when:
+- New Gmail messages arrive
+- Calendar events are created
+- HubSpot records change
+
+To keep the system simple and reliable:
+- **Polling** is used instead of real-time webhooks
+- Each trigger prompts the agent to decide whether action is required
+
+This avoids hard-coded workflows and keeps behavior LLM-driven.
+
+---
+
+## 🏗️ Architecture Overview
+
+Frontend (Chat UI)
+↓
+Laravel API
+↓
+LLM (OpenAI)
+↓
+Tools
+├── Gmail
+├── Google Calendar
+├── HubSpot
+├── Database
+└── Vector Store (pgvector)
+
+### Key Design Principles
+- AI-first (LLM decides actions)
+- Minimal hard-coded logic
+- Clear separation of:
+  - Reasoning
+  - Tools
+  - Memory
+  - Knowledge (RAG)
+
+---
+
+## 🗄️ Database Schema (Simplified)
+
+Core tables:
+- `users`
+- `integrations` (OAuth tokens)
+- `emails`
+- `calendar_events`
+- `hubspot_contacts`
+- `hubspot_notes`
+- `documents` (vector embeddings)
+- `agent_instructions`
+- `tasks`
+
+---
+
+## 🛠️ Tech Stack
+
+**Backend**
+- Laravel
+- PostgreSQL + pgvector
+- OpenAI API (LLM + embeddings)
+
+**Frontend**
+- Livewire
+
+**Integrations**
+- Gmail API
+- Google Calendar API
+- HubSpot CRM API
+
+**Deployment**
+- ???
+
+---
+
+
+## 🧪 Known Limitations (By Design)
+
+This project intentionally limits scope to meet a strict timebox:
+
+- Single-user only
+- Polling instead of real-time webhooks
+- Limited email history imported
+- No background job queue optimization
+- UI focused on clarity, not pixel perfection
+
+These tradeoffs were made to prioritize **correct agent behavior and system design**.
+
+---
+
+## 📌 Why This Matters
+
+If hired, this architecture is designed to:
+- Scale to multi-user
+- Add more tools without refactoring core logic
+- Support more integrations
+- Improve automation depth incrementally
+
+The core agent loop, memory model, and tool abstraction are production-ready foundations.
+
+---
+
+## 📝 How to Run Locally
+
+```bash
+git clone this repo
+
+cp .env.example .env
+composer install
+php artisan key:generate
+php artisan migrate
+
+php artisan serve
+
+-- Requires PostgreSQL with pgvector enabled
