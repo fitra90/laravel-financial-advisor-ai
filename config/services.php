@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URL'),
+    ],
+    
+    'hubspot' => [
+        'client_id' => env('HUBSPOT_CLIENT_ID'),
+        'client_secret' => env('HUBSPOT_CLIENT_SECRET'),
+        'redirect' => env('HUBSPOT_REDIRECT_URI'),
+    ],
+
 ];

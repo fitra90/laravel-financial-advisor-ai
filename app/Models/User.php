@@ -21,6 +21,14 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'google_id',
+        'google_token',
+        'google_refresh_token',
+        'google_token_expires_at',
+        'hubspot_id',
+        'hubspot_token',
+        'hubspot_refresh_token',
+        'hubspot_token_expires_at',
     ];
 
     /**
@@ -31,6 +39,17 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'google_token',
+        'google_refresh_token',
+        'hubspot_token',
+        'hubspot_refresh_token',
+    ];
+
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        'google_token_expires_at' => 'datetime',
+        'hubspot_token_expires_at' => 'datetime',
+        'password' => 'hashed',
     ];
 
     /**
@@ -44,5 +63,31 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    // Relationships
+    public function messages()
+    {
+        return $this->hasMany(Message::class);
+    }
+
+    public function tasks()
+    {
+        return $this->hasMany(Task::class);
+    }
+
+    public function instructions()
+    {
+        return $this->hasMany(Instruction::class);
+    }
+
+    public function emails()
+    {
+        return $this->hasMany(Email::class);
+    }
+
+    public function contacts()
+    {
+        return $this->hasMany(Contact::class);
     }
 }
