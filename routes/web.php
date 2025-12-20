@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Auth\OAuthController;
+use Illuminate\Support\Facades\Auth;
 
 // Home page (login page)
 Route::get('/', function () {

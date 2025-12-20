@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -33,6 +34,8 @@ return new class extends Migration
             $table->index(['user_id', 'email_date']);
             $table->index('gmail_id');
         });
+
+        DB::statement('CREATE INDEX emails_embedding_idx ON emails USING ivfflat (embedding vector_cosine_ops)');
     }
 
     /**
