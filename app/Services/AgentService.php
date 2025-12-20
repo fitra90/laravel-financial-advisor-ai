@@ -8,6 +8,11 @@ use Gemini\Laravel\Facades\Gemini;
 use Gemini\Resources\Parts\TextPart;
 use Gemini\Resources\Parts\FunctionCallPart;
 use Gemini\Resources\Parts\FunctionResponsePart;
+use Gemini\Data\Tool;  
+use Gemini\Data\FunctionDeclaration;
+use Gemini\Data\Schema;
+use Gemini\Data\ToolConfig;
+use Gemini\Enums\DataType;
 use Illuminate\Support\Facades\Log;
 
 class AgentService
@@ -16,7 +21,7 @@ class AgentService
     protected $ragService;
     protected $gmailService;
     protected $hubspotService;
-    protected $model = 'gemini-2.0-flash-exp'; // Fast and free!
+    protected $model = 'gemini-1.5-flash'; // Fast and free!
 
     public function __construct(User $user)
     {
@@ -35,116 +40,119 @@ class AgentService
     /**
      * Get available tools for function calling (Gemini format)
      */
-    protected function getTools(): array
+    protected function getTools(): Tool
     {
-        return [
-            'search_emails' => [
-                'name' => 'search_emails',
-                'description' => 'Search through the user\'s emails using semantic search. Use this when the user asks about email content, who said what, or any information that might be in emails.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'query' => [
-                            'type' => 'string',
-                            'description' => 'The search query to find relevant emails',
+        return new Tool(
+            functionDeclarations: [
+                new FunctionDeclaration(
+                    name: 'search_emails',
+                    description: 'Search through the user\'s emails using semantic search. Use this when the user asks about email content, who said what, or any information that might be in emails.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'query' => new Schema(
+                                type: DataType::STRING,
+                                description: 'The search query to find relevant emails'
+                            ),
+                            'limit' => new Schema(
+                                type: DataType::INTEGER,
+                                description: 'Maximum number of results to return'
+                            ),
                         ],
-                        'limit' => [
-                            'type' => 'integer',
-                            'description' => 'Maximum number of results to return',
+                        required: ['query']
+                    )
+                ),
+                new FunctionDeclaration(
+                    name: 'search_contacts',
+                    description: 'Search through Hubspot CRM contacts. Use this when the user asks about clients, contact information, or people in their CRM.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'query' => new Schema(
+                                type: DataType::STRING,
+                                description: 'The search query to find relevant contacts'
+                            ),
+                            'limit' => new Schema(
+                                type: DataType::INTEGER,
+                                description: 'Maximum number of results to return'
+                            ),
                         ],
-                    ],
-                    'required' => ['query'],
-                ],
-            ],
-            'search_contacts' => [
-                'name' => 'search_contacts',
-                'description' => 'Search through Hubspot CRM contacts. Use this when the user asks about clients, contact information, or people in their CRM.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'query' => [
-                            'type' => 'string',
-                            'description' => 'The search query to find relevant contacts',
+                        required: ['query']
+                    )
+                ),
+                new FunctionDeclaration(
+                    name: 'send_email',
+                    description: 'Send an email via Gmail. Use this when the user asks you to send an email or contact someone.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'to' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Recipient email address'
+                            ),
+                            'subject' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Email subject line'
+                            ),
+                            'body' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Email body content'
+                            ),
                         ],
-                        'limit' => [
-                            'type' => 'integer',
-                            'description' => 'Maximum number of results to return',
+                        required: ['to', 'subject', 'body']
+                    )
+                ),
+                new FunctionDeclaration(
+                    name: 'create_hubspot_contact',
+                    description: 'Create a new contact in Hubspot CRM.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'email' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Contact email address'
+                            ),
+                            'firstname' => new Schema(
+                                type: DataType::STRING,
+                                description: 'First name'
+                            ),
+                            'lastname' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Last name'
+                            ),
+                            'phone' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Phone number'
+                            ),
+                            'company' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Company name'
+                            ),
                         ],
-                    ],
-                    'required' => ['query'],
-                ],
-            ],
-            'send_email' => [
-                'name' => 'send_email',
-                'description' => 'Send an email via Gmail. Use this when the user asks you to send an email or contact someone.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'to' => [
-                            'type' => 'string',
-                            'description' => 'Recipient email address',
+                        required: ['email']
+                    )
+                ),
+                new FunctionDeclaration(
+                    name: 'add_contact_note',
+                    description: 'Add a note to a Hubspot contact.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'contact_email' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Email of the contact to add note to'
+                            ),
+                            'note' => new Schema(
+                                type: DataType::STRING,
+                                description: 'The note content to add'
+                            ),
                         ],
-                        'subject' => [
-                            'type' => 'string',
-                            'description' => 'Email subject line',
-                        ],
-                        'body' => [
-                            'type' => 'string',
-                            'description' => 'Email body content',
-                        ],
-                    ],
-                    'required' => ['to', 'subject', 'body'],
-                ],
-            ],
-            'create_hubspot_contact' => [
-                'name' => 'create_hubspot_contact',
-                'description' => 'Create a new contact in Hubspot CRM.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'email' => [
-                            'type' => 'string',
-                            'description' => 'Contact email address',
-                        ],
-                        'firstname' => [
-                            'type' => 'string',
-                            'description' => 'First name',
-                        ],
-                        'lastname' => [
-                            'type' => 'string',
-                            'description' => 'Last name',
-                        ],
-                        'phone' => [
-                            'type' => 'string',
-                            'description' => 'Phone number',
-                        ],
-                        'company' => [
-                            'type' => 'string',
-                            'description' => 'Company name',
-                        ],
-                    ],
-                    'required' => ['email'],
-                ],
-            ],
-            'add_contact_note' => [
-                'name' => 'add_contact_note',
-                'description' => 'Add a note to a Hubspot contact.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'contact_email' => [
-                            'type' => 'string',
-                            'description' => 'Email of the contact to add note to',
-                        ],
-                        'note' => [
-                            'type' => 'string',
-                            'description' => 'The note content to add',
-                        ],
-                    ],
-                    'required' => ['contact_email', 'note'],
-                ],
-            ],
-        ];
+                        required: ['contact_email', 'note']
+                    )
+                ),
+            ]
+        );
+
     }
 
     /**
@@ -324,7 +332,7 @@ class AgentService
         }
 
         // Call Gemini with function calling
-        $response = $this->callGemini($contents);
+        $response = $this->callGemini($contents, $userMessage);
 
         return $response;
     }
@@ -332,33 +340,69 @@ class AgentService
     /**
      * Call Gemini with function calling
      */
-    protected function callGemini(array $contents, int $maxIterations = 5): array
+    protected function callGemini(array $contents, string $userMessage, int $maxIterations = 5): array
     {
         $iterations = 0;
         $toolResults = [];
-        $tools = $this->getTools();
 
         while ($iterations < $maxIterations) {
             $iterations++;
 
             try {
-                $chat = Gemini::geminiPro()
-                    ->startChat()
-                    ->withTools(array_values($tools));
+            
+                $model = Gemini::generativeModel(model: 'gemini-1.5-flash')
+                            ->withTool($this->getTools());
+                            
+                $chat = $model->startChat();
 
-                // Send all history
+                //    Send all history (the way you're sending history looks slightly unusual, 
+                //    but assuming $contents is structured correctly for historical messages
+                //    it will work, though typically you'd send one final message).
                 foreach ($contents as $content) {
-                    $chat = $chat->sendMessage($content['parts'][0]['text']);
+                    $chat->sendMessage($content['parts'][0]['text']);
                 }
 
-                $result = $chat->getResponse();
+               // Get last user message
+                $lastMessage = end($contents);
+                $userText = $lastMessage['parts'][0]['text'] ?? '';
+
+                if (empty($userText)) {
+                    throw new \Exception('No user message found');
+                }
+
+                $result = $chat->sendMessage($userText);
                 $text = $result->text();
                 
-                // Check for function calls
-                $functionCalls = $result->functionCalls();
+                // // Check for function calls
 
-                if (empty($functionCalls)) {
-                    // No function calls, we have final answer
+                $parts = $result->parts();
+
+                $functionCall = collect($parts)->firstWhere('functionCall');
+
+                if ($functionCall) {
+                    $name = $functionCall->functionCall->name;
+                    $args = (array) $functionCall->functionCall->args;
+
+                    // Now execute your tool
+                    $toolResult = $this->executeTool($name, $args);
+
+                    // Send back function response
+                    $chat->sendMessage([
+                        'role' => 'tool',
+                        'parts' => [[
+                            'functionResponse' => [
+                                'name' => $name,
+                                'response' => $toolResult
+                            ]
+                        ]]
+                    ]);
+
+                    // Get final text response
+                    $finalResponse = $chat->sendMessage(''); // or 'Continue'
+                    $finalText = $finalResponse->text();
+                } else {
+                    // No function call — direct text response
+                    // $text = $result->text();
                     Message::create([
                         'user_id' => $this->user->id,
                         'role' => 'assistant',
@@ -368,35 +412,49 @@ class AgentService
                             'model' => $this->model,
                         ],
                     ]);
-
-                    return [
-                        'content' => $text,
-                        'tool_calls' => $toolResults,
-                    ];
                 }
+                // $functionCalls = $result->functionCalls();
 
-                // Execute function calls
-                foreach ($functionCalls as $call) {
-                    $toolName = $call->name;
-                    $toolArgs = (array) $call->args;
+                // if (empty($functionCalls)) {
+                //     // No function calls, we have final answer
+                //     Message::create([
+                //         'user_id' => $this->user->id,
+                //         'role' => 'assistant',
+                //         'content' => $text,
+                //         'metadata' => [
+                //             'tool_calls' => $toolResults,
+                //             'model' => $this->model,
+                //         ],
+                //     ]);
 
-                    $toolResult = $this->executeTool($toolName, $toolArgs);
-                    $toolResults[] = [
-                        'tool' => $toolName,
-                        'result' => $toolResult,
-                    ];
+                //     return [
+                //         'content' => $text,
+                //         'tool_calls' => $toolResults,
+                //     ];
+                // }
 
-                    // Send function response back to Gemini
-                    $chat->sendMessage([
-                        'functionResponse' => [
-                            'name' => $toolName,
-                            'response' => $toolResult,
-                        ],
-                    ]);
-                }
+                // // Execute function calls
+                // foreach ($functionCalls as $call) {
+                //     $toolName = $call->name;
+                //     $toolArgs = (array) $call->args;
+
+                //     $toolResult = $this->executeTool($toolName, $toolArgs);
+                //     $toolResults[] = [
+                //         'tool' => $toolName,
+                //         'result' => $toolResult,
+                //     ];
+
+                //     // Send function response back to Gemini
+                //     $chat->sendMessage([
+                //         'functionResponse' => [
+                //             'name' => $toolName,
+                //             'response' => $toolResult,
+                //         ],
+                //     ]);
+                // }
 
                 // Get final response after function calls
-                $finalResult = $chat->getResponse();
+                $finalResult = $chat->sendMessage($userText);
                 $finalText = $finalResult->text();
 
                 Message::create([
