@@ -13,6 +13,13 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/login', function () {
+    if (Auth::check()) {
+        return redirect('/dashboard');
+    }
+    return view('welcome');
+})->name('login');
+
 // Google OAuth routes
 Route::get('/auth/google', [OAuthController::class, 'redirectToGoogle'])->name('auth.google');
 Route::get('/auth/google/callback', [OAuthController::class, 'handleGoogleCallback']);
