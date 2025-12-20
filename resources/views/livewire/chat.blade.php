@@ -62,21 +62,25 @@
             </div>
         @endif
     </div>
-
     {{-- Input Area --}}
-    <div class="border-t bg-white p-4">
-        <form wire:submit.prevent="sendMessage" class="flex space-x-4">
-            <input 
-                wire:model="message" 
-                type="text" 
+    <div class="border-t border-gray-300 bg-white p-4 shadow-sm" style="height: 150px;">
+        <form wire:submit.prevent="sendMessage" class="flex items-end gap-4">
+            <textarea
+                wire:model.debounce.500ms="message"
                 placeholder="Ask me anything about your emails or contacts..."
-                class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows="1"
+                class="flex-1 min-h-12 max-h-32 resize-none rounded-lg border border-gray-300 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 @if($isProcessing) disabled @endif
-            >
-            
-            <button 
-                type="submit" 
-                class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                x-data
+                x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px';"
+                @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px';"
+                @keydown.enter.shift="$event.preventDefault(); $el.value += '\n'; $nextTick(() => $dispatch('input'))"
+                @keydown.enter.prevent="!$event.shiftKey && $wire.sendMessage()"
+            ></textarea>
+
+            <button
+                type="submit"
+                class="mb-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 @if($isProcessing) disabled @endif
             >
                 <svg wire:loading.remove class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,12 +90,13 @@
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
+                <span wire:loading.remove>Send</span>
             </button>
 
-            <button 
+            <button
                 type="button"
                 wire:click="clearChat"
-                class="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                class="mb-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50"
                 @if($isProcessing) disabled @endif
             >
                 Clear

@@ -21,7 +21,7 @@ class AgentService
     protected $ragService;
     protected $gmailService;
     protected $hubspotService;
-    protected $model = 'gemini-1.5-flash'; // Fast and free!
+    protected $model = 'gemini-2.5-flash-lite'; // Fast and free!
 
     public function __construct(User $user)
     {
@@ -350,7 +350,7 @@ class AgentService
 
             try {
             
-                $model = Gemini::generativeModel(model: 'gemini-1.5-flash')
+                $model = Gemini::generativeModel(model: 'gemini-2.5-flash-lite')
                             ->withTool($this->getTools());
                             
                 $chat = $model->startChat();
@@ -412,46 +412,30 @@ class AgentService
                             'model' => $this->model,
                         ],
                     ]);
+                     return [
+                        'content' => $text,
+                        'tool_calls' => $toolResults,
+                    ];
                 }
-                // $functionCalls = $result->functionCalls();
+               
+                foreach ($functionCall as $call) {
+                    $toolName = $call->name;
+                    $toolArgs = (array) $call->args;
 
-                // if (empty($functionCalls)) {
-                //     // No function calls, we have final answer
-                //     Message::create([
-                //         'user_id' => $this->user->id,
-                //         'role' => 'assistant',
-                //         'content' => $text,
-                //         'metadata' => [
-                //             'tool_calls' => $toolResults,
-                //             'model' => $this->model,
-                //         ],
-                //     ]);
+                    $toolResult = $this->executeTool($toolName, $toolArgs);
+                    $toolResults[] = [
+                        'tool' => $toolName,
+                        'result' => $toolResult,
+                    ];
 
-                //     return [
-                //         'content' => $text,
-                //         'tool_calls' => $toolResults,
-                //     ];
-                // }
-
-                // // Execute function calls
-                // foreach ($functionCalls as $call) {
-                //     $toolName = $call->name;
-                //     $toolArgs = (array) $call->args;
-
-                //     $toolResult = $this->executeTool($toolName, $toolArgs);
-                //     $toolResults[] = [
-                //         'tool' => $toolName,
-                //         'result' => $toolResult,
-                //     ];
-
-                //     // Send function response back to Gemini
-                //     $chat->sendMessage([
-                //         'functionResponse' => [
-                //             'name' => $toolName,
-                //             'response' => $toolResult,
-                //         ],
-                //     ]);
-                // }
+                    // Send function response back to Gemini
+                    $chat->sendMessage([
+                        'functionResponse' => [
+                            'name' => $toolName,
+                            'response' => $toolResult,
+                        ],
+                    ]);
+                }
 
                 // Get final response after function calls
                 $finalResult = $chat->sendMessage($userText);
