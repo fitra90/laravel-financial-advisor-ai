@@ -63,7 +63,7 @@
     </div>
 
     <!-- Quick Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    {{-- <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div class="bg-white rounded-lg shadow p-6">
             <div class="text-sm text-gray-500">Total Messages</div>
             <div class="text-2xl font-bold text-gray-900">{{ Auth::user()->messages()->count() }}</div>
@@ -76,7 +76,7 @@
             <div class="text-sm text-gray-500">Ongoing Instructions</div>
             <div class="text-2xl font-bold text-gray-900">{{ Auth::user()->instructions()->where('is_active', true)->count() }}</div>
         </div>
-    </div>
+    </div> --}}
 
     <!-- Chat Interface Placeholder -->
     <div class="bg-white rounded-lg shadow overflow-hidden">

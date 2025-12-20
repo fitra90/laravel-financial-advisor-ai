@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Socialite\Facades\Socialite;
+use Illuminate\Support\Facades\Http;
+use HubSpot\Utils\OAuth2;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 
 class OAuthController extends Controller
 {
@@ -63,21 +66,50 @@ class OAuthController extends Controller
     }
 
     /**
-     * Redirect to Hubspot OAuth (we'll implement this on Day 2)
+     * Redirect to Hubspot OAuth
      */
     public function redirectToHubspot()
     {
-        // We'll implement this tomorrow
-        return redirect('/dashboard')->with('info', 'Hubspot integration coming soon!');
+        $provider = Socialite::driver('hubspot');
+
+        $scopes = config('services.hubspot.scopes', []);
+
+        // Use Socialite to build the HubSpot authorization redirect
+        return $provider->scopes($scopes)->redirect();
     }
 
     /**
-     * Handle Hubspot OAuth callback (we'll implement this on Day 2)
+     * Handle Hubspot OAuth callback
      */
-    public function handleHubspotCallback()
+    public function handleHubspotCallback(Request $request)
     {
-        // We'll implement this tomorrow
+        if (!$request->has('code')) {
+            return redirect('/dashboard')->with('error', 'Authorization failed');
+        }
+
+        try {
+            // Use Socialite to retrieve tokens from HubSpot
+            $hubspotUser = Socialite::driver('hubspot')->user();
+
+            $user = Auth::user();
+            if (!$user) {
+                return redirect('/')->with('error', 'Please login first!');
+            }
+
+            $user->update([
+                'hubspot_token' => $hubspotUser->token,
+                'hubspot_refresh_token' => $hubspotUser->refreshToken ?? null,
+                'hubspot_token_expires_at' => $hubspotUser->expiresIn ? Carbon::now()->addSeconds($hubspotUser->expiresIn) : null,
+            ]);
+
+            return redirect('/dashboard')->with('success', 'HubSpot connected successfully!');
+
+        } catch (\Exception $e) {
+            return redirect('/dashboard')->with('error', 'Failed to connect: ' . $e->getMessage());
+        }
     }
+
+
 
     /**
      * Logout

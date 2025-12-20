@@ -31,6 +31,8 @@ class User extends Authenticatable
         'hubspot_token_expires_at',
     ];
 
+    protected $guarded = [];
+    
     /**
      * The attributes that should be hidden for serialization.
      *
