@@ -18,6 +18,8 @@ class CheckNewEmails implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     protected $user;
+    public $tries = 2;
+    public $timeout = 180; // 3 minutes
 
     public function __construct(User $user)
     {
@@ -26,6 +28,9 @@ class CheckNewEmails implements ShouldQueue
 
     public function handle()
     {
+        // Reload user from database (in case it changed)
+        $this->user->refresh();
+
         if (!$this->user->google_token) {
             Log::info("User {$this->user->id} has no Google token");
             return;
@@ -37,9 +42,9 @@ class CheckNewEmails implements ShouldQueue
             $gmail = new GmailService($this->user);
             
             // Get latest email from DB
-            $latestEmail = Email::where('user_id', $this->user->id)
-                ->orderBy('email_date', 'desc')
-                ->first();
+            // $latestEmail = Email::where('user_id', $this->user->id)
+            //     ->orderBy('email_date', 'desc')
+            //     ->first();
 
             // Sync recent emails (last 10)
             $synced = $gmail->syncEmails(10);

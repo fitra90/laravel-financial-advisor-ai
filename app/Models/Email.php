@@ -22,11 +22,13 @@ class Email extends Model
         'email_date',
         'labels',
         'embedding',
+        'processed_at',
     ];
 
     protected $casts = [
         'email_date' => 'datetime',
         'labels' => 'array',
+        'processed_at' => 'datetime',
     ];
 
     public function user()
