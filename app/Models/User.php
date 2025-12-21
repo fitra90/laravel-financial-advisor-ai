@@ -92,4 +92,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(Contact::class);
     }
+
+    public function threads()
+    {
+        return $this->hasMany(Thread::class)->orderBy('last_message_at', 'desc');
+    }
+
+    public function mentions()
+    {
+        return $this->hasMany(Mention::class);
+    }
 }

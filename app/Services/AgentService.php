@@ -4,15 +4,15 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\Message;
+use Gemini\Data\Content;
 use Gemini\Laravel\Facades\Gemini;
-use Gemini\Resources\Parts\TextPart;
-use Gemini\Resources\Parts\FunctionCallPart;
-use Gemini\Resources\Parts\FunctionResponsePart;
-use Gemini\Data\Tool;  
+use Gemini\Data\Tool;
+use Gemini\Data\FunctionResponse;
 use Gemini\Data\FunctionDeclaration;
+use Gemini\Data\Part;
 use Gemini\Data\Schema;
-use Gemini\Data\ToolConfig;
 use Gemini\Enums\DataType;
+use Gemini\Enums\Role;
 use Illuminate\Support\Facades\Log;
 
 class AgentService
@@ -153,6 +153,18 @@ class AgentService
             ]
         );
 
+    }
+
+    // Helper: ambil teks dari response (aman untuk complex parts)
+    protected function extractText($response): string
+    {
+        $text = '';
+        foreach ($response->parts() as $part) {
+            if ($textPart = $part->text) {
+                $text .= $textPart;
+            }
+        }
+        return trim($text);
     }
 
     /**
@@ -302,42 +314,106 @@ class AgentService
         return ['error' => 'Failed to add note'];
     }
 
-    /**
-     * Main chat method (Gemini version)
-     */
     public function chat(string $userMessage): array
     {
-        // Store user message
-        Message::create([
-            'user_id' => $this->user->id,
-            'role' => 'user',
-            'content' => $userMessage,
-        ]);
+        try {
+            // Ambil history chat (maksimal 10 pesan terakhir untuk konteks)
+            $messages = Message::where('user_id', $this->user->id)
+                ->latest()
+                ->take(10)
+                ->get()
+                ->reverse();
 
-        // Get conversation history
-        $history = Message::where('user_id', $this->user->id)
-            ->orderBy('created_at', 'desc')
-            ->take(3)
-            ->get()
-            ->reverse()
-            ->toArray();
+            // Bangun history dalam format Gemini
+            $history = [];
+            foreach ($messages as $msg) {
+                $history[] = Content::parse(
+                    part: $msg->content,
+                    role: $msg->role === 'assistant' ? Role::MODEL : Role::USER
+                );
+            }
 
-        // ✅ OPTIMIZATION: Detect if tools are needed
-        $needsTools = $this->detectToolNeed($userMessage);
+            // Tambahkan system instruction
+            $systemInstruction = Content::parse(
+                "You are a helpful AI assistant for {$this->user->name}, a financial advisor. " .
+                "You have access to their Gmail and Hubspot CRM via tools. " .
+                "Use tools proactively when needed. Answer concisely and professionally."
+            );
 
-        // Build conversation for Gemini
-        $contents = [];
-        foreach ($history as $msg) {
-            $contents[] = [
-                'role' => $msg['role'] === 'assistant' ? 'model' : 'user',
-                'parts' => [['text' => $msg['content']]],
-            ];
+            // Buat chat session dengan tools
+            $chat = Gemini::generativeModel(model: $this->model)
+                ->withSystemInstruction($systemInstruction)
+                ->withTool($this->getTools())
+                ->startChat(history: $history);
+
+            // Kirim pesan user
+            $response = $chat->sendMessage($userMessage);
+
+            // Setelah $response = $chat->sendMessage($userMessage);
+
+        $toolCalls = [];
+
+        foreach ($response->parts() as $part) {
+            if ($functionCall = $part->functionCall) {
+                $name = $functionCall->name;
+                $args = (array) $functionCall->args;
+
+                $result = $this->executeTool($name, $args);
+
+                $toolCalls[] = [
+                    'tool' => $name,
+                    'args' => $args,
+                    'result' => $result,
+                ];
+
+                // Kirim function response
+                $chat->sendMessage([
+                    new Part(
+                        functionResponse: new FunctionResponse(
+                            name: $name,
+                            response: $result
+                        )
+                    )
+                ]);
+            }
         }
 
-        // Call Gemini with function calling
-        $response = $this->callGemini($contents, $userMessage);
+// Setelah semua tool diproses, ambil respons akhir
+if (!empty($toolCalls)) {
+    // Trigger final generation (bisa kosong atau dengan pesan ringan)
+    $finalResponse = $chat->sendMessage('Summarize the results if needed.');
+} else {
+    $finalResponse = $response;
+}
 
-        return $response;
+$finalText = $this->extractText($finalResponse);
+
+            // Simpan respons assistant
+            Message::create([
+                'user_id' => $this->user->id,
+                'role' => 'assistant',
+                'content' => $finalText,
+                'metadata' => [
+                    'model' => $this->model,
+                    'tool_calls' => $toolCalls,
+                ],
+            ]);
+
+            return [
+                'content' => $finalText ?: 'No response generated.',
+                'tool_calls' => $toolCalls,
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('AgentService chat error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return [
+                'content' => 'Maaf, terjadi kesalahan teknis. Silakan coba lagi.',
+                'error' => true,
+            ];
+        }
     }
 
     /**
@@ -381,135 +457,98 @@ class AgentService
     /**
      * Call Gemini with function calling
      */
-    protected function callGemini(array $contents, string $userMessage, int $maxIterations = 5): array
+    protected function callGemini(string $userMessage, array $history, int $maxIterations = 5): array
     {
         $iterations = 0;
         $toolResults = [];
 
+        // 1. Setup model
+        $model = Gemini::generativeModel(model: $this->model);
+
+        // 2. Tambahkan tools jika diperlukan
+        $needsTools = $this->detectToolNeed($userMessage);
+        if ($needsTools) {
+            $model = $model->withTool($this->getTools());
+        }
+
+        // 3. Start chat dengan history yang benar (pastikan $history adalah array of Content)
+        $chat = $model->startChat(history: $history);
+
+        // 4. Kirim pesan user pertama
+        $response = $chat->sendMessage($userMessage);
+
+        // 5. Loop function calling
         while ($iterations < $maxIterations) {
             $iterations++;
 
-            try {
-            
-                $model = Gemini::generativeModel(model: 'gemini-2.5-flash-lite')
-                            ->withTool($this->getTools());
-                            
-                $chat = $model->startChat();
-
-                //    Send all history (the way you're sending history looks slightly unusual, 
-                //    but assuming $contents is structured correctly for historical messages
-                //    it will work, though typically you'd send one final message).
-                foreach ($contents as $content) {
-                    $chat->sendMessage($content['parts'][0]['text']);
+            // Deteksi apakah ada function call di respons terbaru
+            $functionCalls = [];
+            foreach ($response->parts() as $part) {
+                if ($part->functionCall) {
+                    $functionCalls[] = $part->functionCall;
                 }
-
-               // Get last user message
-                $lastMessage = end($contents);
-                $userText = $lastMessage['parts'][0]['text'] ?? '';
-
-                if (empty($userText)) {
-                    throw new \Exception('No user message found');
-                }
-
-                $result = $chat->sendMessage($userText);
-                $text = $result->text();
-                
-                // // Check for function calls
-
-                $parts = $result->parts();
-
-                $functionCall = collect($parts)->firstWhere('functionCall');
-
-                if ($functionCall) {
-                    $name = $functionCall->functionCall->name;
-                    $args = (array) $functionCall->functionCall->args;
-
-                    // Now execute your tool
-                    $toolResult = $this->executeTool($name, $args);
-
-                    // Send back function response
-                    $chat->sendMessage([
-                        'role' => 'tool',
-                        'parts' => [[
-                            'functionResponse' => [
-                                'name' => $name,
-                                'response' => $toolResult
-                            ]
-                        ]]
-                    ]);
-
-                    // Get final text response
-                    $finalResponse = $chat->sendMessage(''); // or 'Continue'
-                    $finalText = $finalResponse->text();
-                } else {
-                    // No function call — direct text response
-                    // $text = $result->text();
-                    Message::create([
-                        'user_id' => $this->user->id,
-                        'role' => 'assistant',
-                        'content' => $text,
-                        'metadata' => [
-                            'tool_calls' => $toolResults,
-                            'model' => $this->model,
-                        ],
-                    ]);
-                     return [
-                        'content' => $text,
-                        'tool_calls' => $toolResults,
-                    ];
-                }
-               
-                foreach ($functionCall as $call) {
-                    $toolName = $call->name;
-                    $toolArgs = (array) $call->args;
-
-                    $toolResult = $this->executeTool($toolName, $toolArgs);
-                    $toolResults[] = [
-                        'tool' => $toolName,
-                        'result' => $toolResult,
-                    ];
-
-                    // Send function response back to Gemini
-                    $chat->sendMessage([
-                        'functionResponse' => [
-                            'name' => $toolName,
-                            'response' => $toolResult,
-                        ],
-                    ]);
-                }
-
-                // Get final response after function calls
-                $finalResult = $chat->sendMessage($userText);
-                $finalText = $finalResult->text();
-
-                Message::create([
-                    'user_id' => $this->user->id,
-                    'role' => 'assistant',
-                    'content' => $finalText,
-                    'metadata' => [
-                        'tool_calls' => $toolResults,
-                        'model' => $this->model,
-                    ],
-                ]);
-
-                return [
-                    'content' => $finalText,
-                    'tool_calls' => $toolResults,
-                ];
-
-            } catch (\Exception $e) {
-                Log::error('Gemini API error: ' . $e->getMessage());
-                
-                return [
-                    'content' => 'Sorry, I encountered an error: ' . $e->getMessage(),
-                    'error' => true,
-                ];
             }
+
+            // Jika tidak ada function call lagi → keluar loop
+            if (empty($functionCalls)) {
+                break;
+            }
+
+            // Siapkan array of Part untuk function responses
+            $functionResponseParts = [];
+
+            foreach ($functionCalls as $call) {
+                $toolName = $call->name;
+                $toolArgs = (array) $call->args;
+
+                $toolResult = $this->executeTool($toolName, $toolArgs);
+
+                $toolResults[] = [
+                    'tool' => $toolName,
+                    'args' => $toolArgs,
+                    'result' => $toolResult,
+                ];
+
+                // Buat Part yang berisi function response
+                $functionResponseParts[] = new Part(
+                    functionResponse: new FunctionResponse(
+                        name: $toolName,
+                        response: $toolResult // harus array/associative array
+                    )
+                );
+            }
+
+            // Kirim kembali function responses ke model
+            $response = $chat->sendMessage($functionResponseParts);
         }
 
+        // 6. Ekstrak teks akhir (aman untuk complex responses)
+        $finalText = '';
+        foreach ($response->parts() as $part) {
+            if ($part->text) {
+                $finalText .= $part->text;
+            }
+        }
+        $finalText = trim($finalText);
+
+        // 7. Simpan ke database
+        if (!empty($finalText)) {
+            Message::create([
+                'user_id' => $this->user->id,
+                'role' => 'assistant',
+                'content' => $finalText,
+                'metadata' => [
+                    'tool_calls' => $toolResults,
+                    'model' => $this->model,
+                    'iterations' => $iterations,
+                ],
+            ]);
+        }
+
+        // 8. Return hasil
         return [
-            'content' => 'I apologize, but I reached the maximum number of iterations.',
-            'error' => true,
+            'content' => $finalText ?: 'No response from model.',
+            'tool_calls' => $toolResults,
         ];
     }
 

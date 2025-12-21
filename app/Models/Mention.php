@@ -2,18 +2,19 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 
-class Message extends Model
+class Mention extends Model
 {
-     use HasFactory;
+    use HasFactory;
 
     protected $fillable = [
         'user_id',
-        'role',
-        'content',
-        'thread_id',
+        'type',
+        'name',
+        'email',
+        'avatar_url',
         'metadata',
     ];
 

@@ -91,17 +91,11 @@
         </div>
     </div>
 
-    <!-- CHAT INTERFACE - REPLACE THE OLD SECTION -->
-    <div class="bg-white rounded-lg shadow overflow-hidden" style="height: 600px;">
-        <div class="bg-gray-800 text-white px-6 py-4 flex justify-between items-center">
-            <h2 class="text-xl font-semibold">AI Assistant Chat</h2>
-            <div class="text-sm text-gray-300">
-                Powered by Gemini
-            </div>
-        </div>
-        
-        @livewire('chat')
+    <!-- Chat Interface -->
+    <div class="bg-white rounded-lg shadow overflow-hidden" style="height: 700px;">
+        @livewire('advanced-chat')
     </div>
+
 </div>
 
 <script>
