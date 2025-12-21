@@ -11,8 +11,12 @@
     <nav class="bg-white shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
-                <div class="flex items-center">
+                <div class="flex items-center space-x-8">
                     <h1 class="text-xl font-bold">{{ config('app.name') }}</h1>
+                    @auth
+                        <a href="{{ route('dashboard') }}" class="text-gray-700 hover:text-gray-900">Dashboard</a>
+                        <a href="{{ route('instructions.index') }}" class="text-gray-700 hover:text-gray-900">Instructions</a>
+                    @endauth
                 </div>
                 @auth
                     <div class="flex items-center space-x-4">

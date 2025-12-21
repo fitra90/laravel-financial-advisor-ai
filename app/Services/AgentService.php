@@ -317,10 +317,13 @@ class AgentService
         // Get conversation history
         $history = Message::where('user_id', $this->user->id)
             ->orderBy('created_at', 'desc')
-            ->take(10)
+            ->take(3)
             ->get()
             ->reverse()
             ->toArray();
+
+        // ✅ OPTIMIZATION: Detect if tools are needed
+        $needsTools = $this->detectToolNeed($userMessage);
 
         // Build conversation for Gemini
         $contents = [];
@@ -335,6 +338,44 @@ class AgentService
         $response = $this->callGemini($contents, $userMessage);
 
         return $response;
+    }
+
+    /**
+ * Detect if the message needs tools
+ */
+    protected function detectToolNeed(string $message): bool
+    {
+        $message = strtolower($message);
+        
+        // Keywords that indicate tool usage
+        $toolKeywords = [
+            // Search keywords
+            'search', 'find', 'look for', 'show me',
+            'who', 'what', 'where', 'when',
+            
+            // Email keywords  
+            'email', 'mail', 'inbox', 'message', 'sent',
+            
+            // Contact keywords
+            'contact', 'client', 'customer', 'people',
+            'hubspot', 'crm',
+            
+            // Action keywords
+            'send', 'create', 'add', 'make',
+        ];
+        
+        foreach ($toolKeywords as $keyword) {
+            if (str_contains($message, $keyword)) {
+                return true;
+            }
+        }
+        
+        // If message is a question about their data, use tools
+        if (preg_match('/\b(my|our)\b.*\b(email|contact|client)/i', $message)) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -476,13 +517,13 @@ class AgentService
     {
         return "You are an AI assistant for a financial advisor named {$this->user->name}.
 
-You have access to their emails and Hubspot CRM contacts through various tools.
+                You have access to their emails and Hubspot CRM contacts through various tools.
 
-When answering questions:
-1. Use search_emails or search_contacts to find information
-2. Provide helpful, concise answers
-3. If asked to perform actions, use the appropriate tools
+                When answering questions:
+                1. Use search_emails or search_contacts to find information
+                2. Provide helpful, concise answers
+                3. If asked to perform actions, use the appropriate tools
 
-Be proactive and use tools without asking for permission.";
+                Be proactive and use tools without asking for permission. Don't refuse general questions.";
     }
 }

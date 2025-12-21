@@ -4,62 +4,58 @@ namespace App\Http\Controllers;
 
 use App\Models\Instruction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class InstructionController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index()
     {
-        //
+        $instructions = Auth::user()->instructions()
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return view('instructions.index', compact('instructions'));
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
-
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
-        //
+        $request->validate([
+            'instruction' => 'required|string|max:500',
+            'triggers' => 'nullable|array',
+        ]);
+
+        Instruction::create([
+            'user_id' => Auth::id(),
+            'instruction' => $request->instruction,
+            'triggers' => $request->triggers ?? ['new_email'],
+            'is_active' => true,
+        ]);
+
+        return redirect()->route('instructions.index')
+            ->with('success', 'Instruction added successfully!');
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Instruction $instruction)
+    public function toggle(Instruction $instruction)
     {
-        //
+        if ($instruction->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $instruction->update(['is_active' => !$instruction->is_active]);
+
+        return redirect()->route('instructions.index')
+            ->with('success', 'Instruction updated!');
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Instruction $instruction)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, Instruction $instruction)
-    {
-        //
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(Instruction $instruction)
     {
-        //
+        if ($instruction->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $instruction->delete();
+
+        return redirect()->route('instructions.index')
+            ->with('success', 'Instruction deleted!');
     }
 }
