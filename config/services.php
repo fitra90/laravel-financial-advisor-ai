@@ -39,7 +39,13 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URL'),
-    ],
+        'scopes' => [
+            'https://www.googleapis.com/auth/userinfo.email',
+            'https://www.googleapis.com/auth/userinfo.profile',
+            'https://www.googleapis.com/auth/calendar',
+        ],
+        'with' => ['access_type' => 'offline', 'prompt' => 'consent'],
+        ],
     
     'hubspot' => [
         'client_id' => env('HUBSPOT_CLIENT_ID'),

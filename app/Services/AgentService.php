@@ -20,8 +20,9 @@ class AgentService
     protected $user;
     protected $ragService;
     protected $gmailService;
+    protected $calendarService;
     protected $hubspotService;
-    protected $model = 'gemini-2.5-flash-lite'; // Fast and free!
+    protected $model = 'gemini-2.0-flash'; // Fast and free!
 
     public function __construct(User $user)
     {
@@ -30,6 +31,10 @@ class AgentService
         
         if ($user->google_token) {
             $this->gmailService = new GmailService($user);
+        }
+        
+        if ($user->google_token) {
+            $this->calendarService = new CalendarService($user);
         }
         
         if ($user->hubspot_token) {
@@ -150,6 +155,78 @@ class AgentService
                         required: ['contact_email', 'note']
                     )
                 ),
+                new FunctionDeclaration(
+                    name: 'search_calendar_events',
+                    description: 'Search for calendar events and meetings. Use this when the user asks about their schedule, meetings, appointments, or events with specific people.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'query' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Search keyword: person name (e.g. "Jane Smith"), event title, or topic'
+                            ),
+                            'timeMin' => new Schema(
+                                type: DataType::STRING,
+                                nullable: true,
+                                description: 'Start date/time in ISO format (e.g. 2025-12-21T00:00:00Z)'
+                            ),
+                            'timeMax' => new Schema(
+                                type: DataType::STRING,
+                                nullable: true,
+                                description: 'End date/time in ISO format'
+                            ),
+                            'limit' => new Schema(
+                                type: DataType::INTEGER,
+                                nullable: true,
+                                description: 'Maximum number of events to return (default 10)'
+                            ),
+                        ],
+                        required: ['query']
+                    )
+                ),
+                new FunctionDeclaration(
+                    name: 'create_calendar_event',
+                    description: 'Create a new meeting or event in the user\'s Google Calendar. Use this when the user asks to schedule, book, create, or add a meeting/event.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'summary' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Event title or meeting name'
+                            ),
+                            'start' => new Schema(
+                                type: DataType::STRING,
+                                description: 'Start date and time in ISO format with timezone, e.g. 2025-12-22T10:00:00+07:00'
+                            ),
+                            'end' => new Schema(
+                                type: DataType::STRING,
+                                description: 'End date and time in ISO format with timezone, e.g. 2025-12-22T11:00:00+07:00'
+                            ),
+                            'attendees' => new Schema(
+                                type: DataType::ARRAY,
+                                items: new Schema(type: DataType::STRING),
+                                nullable: true,
+                                description: 'List of attendee email addresses'
+                            ),
+                            'description' => new Schema(
+                                type: DataType::STRING,
+                                nullable: true,
+                                description: 'Optional event description or agenda'
+                            ),
+                            'location' => new Schema(
+                                type: DataType::STRING,
+                                nullable: true,
+                                description: 'Optional location'
+                            ),
+                            'conference' => new Schema(
+                                type: DataType::BOOLEAN,
+                                nullable: true,
+                                description: 'Create Google Meet link automatically? (default: true)'
+                            ),
+                        ],
+                        required: ['summary', 'start', 'end']
+                    )
+                ),
             ]
         );
 
@@ -187,7 +264,13 @@ class AgentService
                     
                 case 'create_hubspot_contact':
                     return $this->toolCreateContact($arguments);
+
+                case 'create_calendar_event':
+                    return $this->toolCreateCalendarEvent($arguments);
                     
+                case 'search_calendar_events':
+                    return $this->toolSearchCalendarEvent($arguments);
+
                 case 'add_contact_note':
                     return $this->toolAddContactNote($arguments);
                     
@@ -314,6 +397,28 @@ class AgentService
         return ['error' => 'Failed to add note'];
     }
 
+    protected function toolSearchCalendarEvent(array $args): array
+    {
+        if (!$this->calendarService) {
+            return ['error' => 'Calendar not connected'];
+        }
+        $results = $this->calendarService->searchEvents($args);
+        return $results;
+    }
+
+    protected function toolCreateCalendarEvent(array $args): array
+    {
+        if (!$this->user->google_token) {
+            return ['error' => 'Google account not connected'];
+        }
+
+        if (!$this->calendarService) {
+            $this->calendarService = new CalendarService($this->user);
+        }
+
+        return $this->calendarService->createEvent($args);
+    }
+
     public function chat(string $userMessage): array
     {
         try {
@@ -334,11 +439,7 @@ class AgentService
             }
 
             // Tambahkan system instruction
-            $systemInstruction = Content::parse(
-                "You are a helpful AI assistant for {$this->user->name}, a financial advisor. " .
-                "You have access to their Gmail and Hubspot CRM via tools. " .
-                "Use tools proactively when needed. Answer concisely and professionally."
-            );
+            $systemInstruction = Content::parse($this->getSystemPrompt());
 
             // Buat chat session dengan tools
             $chat = Gemini::generativeModel(model: $this->model)
@@ -351,42 +452,36 @@ class AgentService
 
             // Setelah $response = $chat->sendMessage($userMessage);
 
-        $toolCalls = [];
+            $toolCalls = [];
 
-        foreach ($response->parts() as $part) {
-            if ($functionCall = $part->functionCall) {
-                $name = $functionCall->name;
-                $args = (array) $functionCall->args;
+            foreach ($response->parts() as $part) {
+                if ($functionCall = $part->functionCall) {
+                    $name = $functionCall->name;
+                    $args = (array) $functionCall->args;
 
-                $result = $this->executeTool($name, $args);
+                    $result = $this->executeTool($name, $args);
 
-                $toolCalls[] = [
-                    'tool' => $name,
-                    'args' => $args,
-                    'result' => $result,
-                ];
+                    $toolCalls[] = [
+                        'tool' => $name,
+                        'args' => $args,
+                        'result' => $result,
+                    ];
 
-                // Kirim function response
-                $chat->sendMessage([
-                    new Part(
-                        functionResponse: new FunctionResponse(
-                            name: $name,
-                            response: $result
+                    // Kirim function response
+                    $chat->sendMessage([
+                        new Part(
+                            functionResponse: new FunctionResponse(
+                                name: $name,
+                                response: $result
+                            )
                         )
-                    )
-                ]);
+                    ]);
+                }
             }
-        }
+            
+            $finalResponse = $chat->sendMessage([]); // kirim array kosong → trigger final generation
 
-// Setelah semua tool diproses, ambil respons akhir
-if (!empty($toolCalls)) {
-    // Trigger final generation (bisa kosong atau dengan pesan ringan)
-    $finalResponse = $chat->sendMessage('Summarize the results if needed.');
-} else {
-    $finalResponse = $response;
-}
-
-$finalText = $this->extractText($finalResponse);
+            $finalText = $this->extractText($finalResponse);
 
             // Simpan respons assistant
             Message::create([
@@ -410,11 +505,14 @@ $finalText = $this->extractText($finalResponse);
             ]);
 
             return [
-                'content' => 'Maaf, terjadi kesalahan teknis. Silakan coba lagi.',
+                // 'content' => 'Maaf, terjadi kesalahan teknis. Silakan coba lagi.',
+                'content' => $e->getMessage(),
                 'error' => true,
             ];
         }
     }
+
+   
 
     /**
  * Detect if the message needs tools
@@ -431,6 +529,9 @@ $finalText = $this->extractText($finalResponse);
             
             // Email keywords  
             'email', 'mail', 'inbox', 'message', 'sent',
+
+            // Calendar keywords
+            'meeting', 'schedule', 'calendar', 'appointment', 'event', 'with', 'next',
             
             // Contact keywords
             'contact', 'client', 'customer', 'people',
@@ -552,17 +653,24 @@ $finalText = $this->extractText($finalResponse);
         ];
     }
 
+  
     protected function getSystemPrompt(): string
     {
         return "You are an AI assistant for a financial advisor named {$this->user->name}.
 
-                You have access to their emails and Hubspot CRM contacts through various tools.
+                You can:
+                - Search emails (search_emails)
+                - Search contacts (search_contacts)
+                - Search calendar events (search_calendar_events)
+                - CREATE new meetings/events (create_calendar_event)
+                - Send emails, manage HubSpot contacts
 
-                When answering questions:
-                1. Use search_emails or search_contacts to find information
-                2. Provide helpful, concise answers
-                3. If asked to perform actions, use the appropriate tools
+                When user says:
+                - 'buat meeting', 'schedule', 'book call', 'add event', 'set up meeting'
+                → ALWAYS use create_calendar_event tool
 
-                Be proactive and use tools without asking for permission. Don't refuse general questions.";
+                Be proactive. Parse dates/times intelligently (e.g. 'tomorrow 10am' → proper ISO).
+                Always create Google Meet link unless user says otherwise.
+                Confirm event creation with clear summary.";
     }
 }
