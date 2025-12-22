@@ -1,15 +1,44 @@
+# railway.toml - FIXED VERSION
+
 [build]
 builder = "nixpacks"
-buildCommand = "composer install --no-dev --optimize-autoloader && php artisan optimize"
+buildCommand = "composer install --no-dev --optimize-autoloader && php artisan optimize && php artisan storage:link"
 
-# Web Service
+# Service untuk web application
 [service.web]
 start = "php artisan serve --host=0.0.0.0 --port=${PORT}"
+healthcheckPath = "/"
+healthcheckTimeout = 30
+[service.web.variables]
+PORT = "8000"
 
-# Queue Worker
+# Service untuk queue worker
 [service.worker]
 start = "php artisan queue:work --sleep=3 --tries=3 --timeout=300"
+[service.worker.variables]
+QUEUE_CONNECTION = "redis"
 
-# Scheduler (PENTING untuk scheduled jobs!)
+# Service untuk scheduler
 [service.scheduler]
 start = "php artisan schedule:work"
+[service.scheduler.variables]
+QUEUE_CONNECTION = "redis"
+
+# Database (Railway auto-provision)
+[service.database]
+type = "postgresql"
+version = "15"
+
+# Redis (Railway auto-provision)  
+[service.redis]
+type = "redis"
+version = "7"
+
+# Environment variables
+[variables]
+APP_ENV = "production"
+APP_DEBUG = "false"
+APP_URL = "https://${RAILWAY_STATIC_URL}"
+LOG_CHANNEL = "stderr"
+QUEUE_CONNECTION = "redis"
+PORT = "8000"
