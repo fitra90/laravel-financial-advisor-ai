@@ -232,16 +232,42 @@ class AgentService
 
     }
 
-    // Helper: ambil teks dari response (aman untuk complex parts)
-    protected function extractText($response): string
+   protected function extractText($response): string
     {
-        $text = '';
-        foreach ($response->parts() as $part) {
-            if ($textPart = $part->text) {
-                $text .= $textPart;
-            }
+        if (!$response) {
+            return '';
         }
-        return trim($text);
+
+        try {
+            $text = '';
+            
+            // Handle if response is already a string
+            if (is_string($response)) {
+                return trim($response);
+            }
+
+            // Try to get parts
+            if (method_exists($response, 'parts')) {
+                foreach ($response->parts() as $part) {
+                    if (isset($part->text) && is_string($part->text)) {
+                        $text .= $part->text;
+                    }
+                }
+            }
+            
+            // Try to get text directly
+            if (empty($text) && method_exists($response, 'text')) {
+                $text = $response->text();
+            }
+
+            return trim($text);
+        } catch (\Exception $e) {
+            Log::error('Error in extractText', [
+                'error' => $e->getMessage(),
+                'response_type' => get_class($response)
+            ]);
+            return '';
+        }
     }
 
     /**
@@ -269,7 +295,13 @@ class AgentService
                     return $this->toolCreateCalendarEvent($arguments);
                     
                 case 'search_calendar_events':
-                    return $this->toolSearchCalendarEvent($arguments);
+                    // return $this->toolSearchCalendarEvent($arguments);
+                    $result = $this->toolSearchCalendarEvent($arguments);
+                    if (!is_array($result)) {
+                        $result = ['error' => 'Invalid response format'];
+                    }
+                    
+                    return $result; // Always array[file:1]
 
                 case 'add_contact_note':
                     return $this->toolAddContactNote($arguments);
@@ -402,8 +434,13 @@ class AgentService
         if (!$this->calendarService) {
             return ['error' => 'Calendar not connected'];
         }
+        
         $results = $this->calendarService->searchEvents($args);
-        return $results;
+        if (empty($results) || !is_array($results)) {
+            return ['message' => 'No meetings found matching your query', 'count' => 0, 'events' => []];
+        }
+
+        return $results; // Ensure top-level array[file:1]
     }
 
     protected function toolCreateCalendarEvent(array $args): array
@@ -419,17 +456,110 @@ class AgentService
         return $this->calendarService->createEvent($args);
     }
 
+    // public function chat(string $userMessage): array
+    // {
+    //     try {
+    //         // Ambil history chat (maksimal 10 pesan terakhir untuk konteks)
+    //         $messages = Message::where('user_id', $this->user->id)
+    //             ->latest()
+    //             ->take(10)
+    //             ->get()
+    //             ->reverse();
+
+    //         // Bangun history dalam format Gemini
+    //         $history = [];
+    //         foreach ($messages as $msg) {
+    //             $history[] = Content::parse(
+    //                 part: $msg->content,
+    //                 role: $msg->role === 'assistant' ? Role::MODEL : Role::USER
+    //             );
+    //         }
+
+    //         // Tambahkan system instruction
+    //         $systemInstruction = Content::parse($this->getSystemPrompt());
+
+    //         // Buat chat session dengan tools
+    //         $chat = Gemini::generativeModel(model: $this->model)
+    //             ->withSystemInstruction($systemInstruction)
+    //             ->withTool($this->getTools())
+    //             ->startChat(history: $history);
+
+    //         // Kirim pesan user
+    //         $response = $chat->sendMessage($userMessage);
+
+    //         // Setelah $response = $chat->sendMessage($userMessage);
+
+    //         $toolCalls = [];
+
+    //         foreach ($response->parts() as $part) {
+    //             if ($functionCall = $part->functionCall) {
+    //                 $name = $functionCall->name;
+    //                 $args = (array) $functionCall->args;
+
+    //                 $result = $this->executeTool($name, $args);
+
+    //                 $toolCalls[] = [
+    //                     'tool' => $name,
+    //                     'args' => $args,
+    //                     'result' => $result,
+    //                 ];
+
+    //                 // Kirim function response
+    //                 $chat->sendMessage([
+    //                     new Part(
+    //                         functionResponse: new FunctionResponse(
+    //                             name: $name,
+    //                             response: $result
+    //                         )
+    //                     )
+    //                 ]);
+    //             }
+    //         }
+            
+    //         $finalResponse = $chat->sendMessage([]); // kirim array kosong → trigger final generation
+
+    //         $finalText = $this->extractText($finalResponse);
+
+    //         // Simpan respons assistant
+    //         Message::create([
+    //             'user_id' => $this->user->id,
+    //             'role' => 'assistant',
+    //             'content' => $finalText,
+    //             'metadata' => [
+    //                 'model' => $this->model,
+    //                 'tool_calls' => $toolCalls,
+    //             ],
+    //         ]);
+
+    //         return [
+    //             'content' => $finalText ?: 'No response generated.',
+    //             'tool_calls' => $toolCalls,
+    //         ];
+
+    //     } catch (\Exception $e) {
+    //         Log::error('AgentService chat error: ' . $e->getMessage(), [
+    //             'trace' => $e->getTraceAsString()
+    //         ]);
+
+    //         return [
+    //             // 'content' => 'Maaf, terjadi kesalahan teknis. Silakan coba lagi.',
+    //             'content' => $e->getMessage(),
+    //             'error' => true,
+    //         ];
+    //     }
+    // }
+
     public function chat(string $userMessage): array
     {
         try {
-            // Ambil history chat (maksimal 10 pesan terakhir untuk konteks)
+            // Get chat history (max 10 recent messages for context)
             $messages = Message::where('user_id', $this->user->id)
                 ->latest()
                 ->take(10)
                 ->get()
                 ->reverse();
 
-            // Bangun history dalam format Gemini
+            // Build history in Gemini format
             $history = [];
             foreach ($messages as $msg) {
                 $history[] = Content::parse(
@@ -438,52 +568,131 @@ class AgentService
                 );
             }
 
-            // Tambahkan system instruction
+            // Add system instruction
             $systemInstruction = Content::parse($this->getSystemPrompt());
 
-            // Buat chat session dengan tools
+            // Create chat session with tools
             $chat = Gemini::generativeModel(model: $this->model)
                 ->withSystemInstruction($systemInstruction)
                 ->withTool($this->getTools())
                 ->startChat(history: $history);
 
-            // Kirim pesan user
+            // Send user message
             $response = $chat->sendMessage($userMessage);
 
-            // Setelah $response = $chat->sendMessage($userMessage);
-
             $toolCalls = [];
+            $maxIterations = 5;
+            $iterations = 0;
 
-            foreach ($response->parts() as $part) {
-                if ($functionCall = $part->functionCall) {
-                    $name = $functionCall->name;
-                    $args = (array) $functionCall->args;
+            // Handle function calling loop
+            while ($iterations < $maxIterations) {
+                $iterations++;
+                
+                $hasFunctionCalls = false;
 
-                    $result = $this->executeTool($name, $args);
+                // Check for function calls in response
+                try {
+                    if (!$response || !method_exists($response, 'parts')) {
+                        break;
+                    }
 
-                    $toolCalls[] = [
-                        'tool' => $name,
-                        'args' => $args,
-                        'result' => $result,
-                    ];
+                    foreach ($response->parts() as $part) {
+                        if ($functionCall = $part->functionCall) {
+                            $hasFunctionCalls = true;
+                            $name = $functionCall->name;
+                            $args = (array) $functionCall->args;
 
-                    // Kirim function response
-                    $chat->sendMessage([
-                        new Part(
-                            functionResponse: new FunctionResponse(
-                                name: $name,
-                                response: $result
-                            )
-                        )
+                            Log::info("Executing function: {$name}", ['args' => $args]);
+
+                            // Execute the tool
+                            $result = $this->executeTool($name, $args);
+                            
+                            // Ensure result is a simple array (important for Gemini SDK)
+                            if (!is_array($result)) {
+                                $result = ['result' => (string)$result];
+                            }
+
+                            $toolCalls[] = [
+                                'tool' => $name,
+                                'args' => $args,
+                                'result' => $result,
+                            ];
+
+                            // Send function response immediately (one at a time)
+                            try {
+                                // Create FunctionResponse Part
+                                $functionResponsePart = new Part(
+                                    functionResponse: new FunctionResponse(
+                                        name: $name,
+                                        response: $result
+                                    )
+                                );
+                                
+                                // Send as message
+                                $response = $chat->sendMessage([$functionResponsePart]);
+                            } catch (\Exception $e) {
+                                Log::error('Error sending function response', [
+                                    'function' => $name,
+                                    'error' => $e->getMessage(),
+                                    'result_type' => gettype($result),
+                                ]);
+                                throw $e;
+                            }
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Error in function calling loop', [
+                        'error' => $e->getMessage(),
+                        'iteration' => $iterations
                     ]);
+                    
+                    // Generate fallback response
+                    $fallbackText = $this->generateFallbackResponse($toolCalls);
+                    
+                    Message::create([
+                        'user_id' => $this->user->id,
+                        'role' => 'assistant',
+                        'content' => $fallbackText,
+                        'metadata' => [
+                            'model' => $this->model,
+                            'tool_calls' => $toolCalls,
+                            'error' => $e->getMessage(),
+                        ],
+                    ]);
+
+                    return [
+                        'content' => $fallbackText,
+                        'tool_calls' => $toolCalls,
+                    ];
+                }
+
+                // If no function calls, we're done
+                if (!$hasFunctionCalls) {
+                    break;
                 }
             }
-            
-            $finalResponse = $chat->sendMessage([]); // kirim array kosong → trigger final generation
 
-            $finalText = $this->extractText($finalResponse);
+            // Extract final text from the last response
+            $finalText = '';
+            try {
+                $finalText = $this->extractText($response);
+            } catch (\Exception $e) {
+                Log::error('Error extracting text from response', [
+                    'error' => $e->getMessage()
+                ]);
+            }
 
-            // Simpan respons assistant
+            // If still empty after tool calls, use fallback
+            if (empty($finalText) && !empty($toolCalls)) {
+                $finalText = $this->generateFallbackResponse($toolCalls);
+            }
+
+            // If completely empty
+            if (empty($finalText)) {
+                $finalText = 'I apologize, but I was unable to generate a proper response. Please try rephrasing your question.';
+            }
+
+            // Save assistant response
             Message::create([
                 'user_id' => $this->user->id,
                 'role' => 'assistant',
@@ -491,11 +700,12 @@ class AgentService
                 'metadata' => [
                     'model' => $this->model,
                     'tool_calls' => $toolCalls,
+                    'iterations' => $iterations,
                 ],
             ]);
 
             return [
-                'content' => $finalText ?: 'No response generated.',
+                'content' => $finalText,
                 'tool_calls' => $toolCalls,
             ];
 
@@ -505,14 +715,97 @@ class AgentService
             ]);
 
             return [
-                // 'content' => 'Maaf, terjadi kesalahan teknis. Silakan coba lagi.',
-                'content' => $e->getMessage(),
+                'content' => 'Sorry, a technical error occurred: ' . $e->getMessage(),
                 'error' => true,
+                'message' => $e->getMessage(),
             ];
         }
     }
 
-   
+    /**
+     * Generate a fallback response when AI fails to respond
+     */
+    protected function generateFallbackResponse(array $toolCalls): string
+    {
+        if (empty($toolCalls)) {
+            return "I encountered an issue processing your request. Please try again.";
+        }
+
+        $response = "Here's what I found:\n\n";
+
+        foreach ($toolCalls as $call) {
+            $toolName = $call['tool'];
+            $result = $call['result'];
+
+            switch ($toolName) {
+                case 'search_calendar_events':
+                    if (isset($result['events']) && !empty($result['events'])) {
+                        $response .= "📅 Calendar Events:\n";
+                        foreach ($result['events'] as $event) {
+                            $response .= "• {$event['title']} on {$event['start']}\n";
+                            if (!empty($event['attendees'])) {
+                                $response .= "  Attendees: " . implode(', ', $event['attendees']) . "\n";
+                            }
+                        }
+                    } else {
+                        $response .= "No calendar events found.\n";
+                    }
+                    break;
+
+                case 'search_emails':
+                    if (isset($result['emails']) && !empty($result['emails'])) {
+                        $response .= "📧 Emails ({$result['count']} found):\n";
+                        foreach ($result['emails'] as $email) {
+                            $response .= "• From {$email['from']}: {$email['subject']}\n";
+                        }
+                    } else {
+                        $response .= "No emails found.\n";
+                    }
+                    break;
+
+                case 'search_contacts':
+                    if (isset($result['contacts']) && !empty($result['contacts'])) {
+                        $response .= "👤 Contacts ({$result['count']} found):\n";
+                        foreach ($result['contacts'] as $contact) {
+                            $response .= "• {$contact['name']} - {$contact['email']}\n";
+                        }
+                    } else {
+                        $response .= "No contacts found.\n";
+                    }
+                    break;
+
+                case 'send_email':
+                    if (isset($result['success']) && $result['success']) {
+                        $response .= "✅ {$result['message']}\n";
+                    } else {
+                        $response .= "❌ Failed to send email.\n";
+                    }
+                    break;
+
+                case 'create_calendar_event':
+                    if (isset($result['success']) && $result['success']) {
+                        $response .= "✅ {$result['message']}\n";
+                        if (isset($result['event']['meet_link'])) {
+                            $response .= "🔗 Meet link: {$result['event']['meet_link']}\n";
+                        }
+                    } else {
+                        $response .= "❌ Failed to create event.\n";
+                    }
+                    break;
+
+                default:
+                    if (isset($result['error'])) {
+                        $response .= "❌ Error: {$result['error']}\n";
+                    } elseif (isset($result['message'])) {
+                        $response .= "ℹ️ {$result['message']}\n";
+                    }
+            }
+
+            $response .= "\n";
+        }
+
+        return trim($response);
+    }
 
     /**
  * Detect if the message needs tools
@@ -657,20 +950,24 @@ class AgentService
     protected function getSystemPrompt(): string
     {
         return "You are an AI assistant for a financial advisor named {$this->user->name}.
+                You have access to these tools:
+                - search_emails: Find information in emails
+                - search_contacts: Find client/contact information  
+                - search_calendar_events: Find meetings and appointments
+                - create_calendar_event: Schedule new meetings/events
+                - send_email: Send emails
+                - create_hubspot_contact: Add new CRM contacts
+                - add_contact_note: Add notes to contacts
 
-                You can:
-                - Search emails (search_emails)
-                - Search contacts (search_contacts)
-                - Search calendar events (search_calendar_events)
-                - CREATE new meetings/events (create_calendar_event)
-                - Send emails, manage HubSpot contacts
+                IMPORTANT for calendar queries:
+                - When user asks 'when is my meeting with X?' or 'do I have meeting with X?' 
+                → Use search_calendar_events with query='X' (the person's name)
+                - When user says 'schedule meeting', 'book call', 'create event'
+                → Use create_calendar_event
 
-                When user says:
-                - 'buat meeting', 'schedule', 'book call', 'add event', 'set up meeting'
-                → ALWAYS use create_calendar_event tool
+                Current date: " . now()->toDateString() . "
+                Current time: " . now()->toTimeString() . "
 
-                Be proactive. Parse dates/times intelligently (e.g. 'tomorrow 10am' → proper ISO).
-                Always create Google Meet link unless user says otherwise.
-                Confirm event creation with clear summary.";
+                Be helpful, proactive, and provide clear summaries of search results.";
     }
 }
