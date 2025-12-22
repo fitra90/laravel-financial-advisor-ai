@@ -181,7 +181,7 @@ class AdvancedChat extends Component
         // From email senders (unique emails)
         $emails = $user->emails
             ->select('from_email', 'from_name')
-            ->distinct('from_email')
+            ->unique('from_email')
             ->limit(50)
             ->get();
 
