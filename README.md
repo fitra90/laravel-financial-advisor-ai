@@ -1,15 +1,13 @@
-# AI Financial Advisor Agent
+# Laravel Financial Advisor AI Agent
 
 An AI-powered assistant for Financial Advisors that integrates with **Gmail**, **Google Calendar**, and **HubSpot CRM**.  
 The agent provides a ChatGPT-like interface that can **answer questions**, **retrieve context via RAG**, and **take actions autonomously using tool calling and memory**.
 
-This project was built as a time-boxed technical challenge and intentionally focuses on **core agent architecture, reasoning, and extensibility**.
 ---
 
 ## 🚀 Live Demo
 
-- **App URL:** https://<your-app-url>
-- **GitHub Repo:** https://github.com/fitra90/laravel-financial-advisor-ai
+- **App URL:** https://laravel-financial-advisor-ai-production.up.railway.app/
 
 > ⚠️ Note: This app is configured for a **single test user** and uses OAuth test credentials.
 
@@ -104,19 +102,6 @@ This avoids hard-coded workflows and keeps behavior LLM-driven.
 
 ## 🏗️ Architecture Overview
 
-Frontend (Chat UI)
-↓
-Laravel API
-↓
-LLM (OpenAI)
-↓
-Tools
-├── Gmail
-├── Google Calendar
-├── HubSpot
-├── Database
-└── Vector Store (pgvector)
-
 ### Key Design Principles
 - AI-first (LLM decides actions)
 - Minimal hard-coded logic
@@ -148,7 +133,7 @@ Core tables:
 **Backend**
 - Laravel
 - PostgreSQL + pgvector
-- OpenAI API (LLM + embeddings)
+- Gemini API (LLM + embeddings)
 
 **Frontend**
 - Livewire
@@ -159,7 +144,7 @@ Core tables:
 - HubSpot CRM API
 
 **Deployment**
-- ???
+- Railway (CI/CD activated)
 
 ---
 
@@ -175,18 +160,6 @@ This project intentionally limits scope to meet a strict timebox:
 - UI focused on clarity, not pixel perfection
 
 These tradeoffs were made to prioritize **correct agent behavior and system design**.
-
----
-
-## 📌 Why This Matters
-
-If hired, this architecture is designed to:
-- Scale to multi-user
-- Add more tools without refactoring core logic
-- Support more integrations
-- Improve automation depth incrementally
-
-The core agent loop, memory model, and tool abstraction are production-ready foundations.
 
 ---
 
