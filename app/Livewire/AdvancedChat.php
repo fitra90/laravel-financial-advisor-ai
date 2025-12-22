@@ -182,8 +182,7 @@ class AdvancedChat extends Component
         $emails = $user->emails
             ->select('from_email', 'from_name')
             ->unique('from_email')
-            ->limit(50)
-            ->get();
+            ->take(50);
 
         foreach ($emails as $email) {
             if ($email->from_email && !Mention::where('user_id', $user->id)->where('email', $email->from_email)->exists()) {
