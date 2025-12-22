@@ -22,7 +22,7 @@ class AgentService
     protected $gmailService;
     protected $calendarService;
     protected $hubspotService;
-    protected $model = 'gemini-2.0-flash'; // Fast and free!
+    protected $model = 'gemini-2.5-flash-lite'; // Fast and free!
 
     public function __construct(User $user)
     {

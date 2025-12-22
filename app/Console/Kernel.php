@@ -20,6 +20,12 @@ class Kernel extends ConsoleKernel
             }
         })->everyFiveMinutes()->name('check-new-emails');
 
+        // Sync all calendars every 6 hours
+        $schedule->command('calendar:sync --all')
+            ->everySixHours()
+            ->withoutOverlapping()
+            ->runInBackground();
+
         // Cleanup old messages (optional)
         $schedule->command('model:prune', ['--model' => 'App\\Models\\Message'])
             ->daily();

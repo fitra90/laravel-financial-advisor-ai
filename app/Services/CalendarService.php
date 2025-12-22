@@ -3,164 +3,208 @@
 namespace App\Services;
 
 use App\Models\User;
-use Google\Client;
-use Google\Service\Calendar;
-use Google\Service\Calendar\Event;
-use Illuminate\Support\Carbon;
+use Google\Client as GoogleClient;
+use Google\Service\Calendar as GoogleCalendar;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
-class CalendarService
+class GoogleCalendarService
 {
     protected $user;
     protected $client;
-    protected $service;
+    protected $embeddingService;
 
     public function __construct(User $user)
     {
         $this->user = $user;
-
-        $client = new Client();
-        $client->setClientId(config('services.google.client_id'));
-        $client->setClientSecret(config('services.google.client_secret'));
-        $client->setRedirectUri(config('services.google.redirect'));
-        $client->addScope(Calendar::CALENDAR_READONLY);
-
-        // Refresh token jika access token expired
-        if ($user->google_token) {
-            $client->setAccessToken($user->google_token);
-
-            if ($client->isAccessTokenExpired()) {
-                if ($client->getRefreshToken()) {
-                    $client->fetchAccessTokenWithRefreshToken($client->getRefreshToken());
-                    $newToken = $client->getAccessToken();
-
-                    // Simpan token baru ke user
-                    $user->update(['google_token' => $newToken]);
-                }
-            }
-        }
-
-        $this->client = $client;
-        $this->service = new Calendar($client);
+        $this->embeddingService = new EmbeddingService();
+        $this->initializeClient();
     }
 
     /**
-     * Cari event berdasarkan nama orang, kata kunci, atau waktu
+     * Initialize Google Client
      */
-    public function searchEvents(array $params): array
+    protected function initializeClient(): void
     {
-        $query = $params['query'] ?? '';
-        $timeMin = $params['timeMin'] ?? null; // ISO datetime
-        $timeMax = $params['timeMax'] ?? null;
-        $limit = $params['limit'] ?? 10;
+        $this->client = new GoogleClient();
+        $this->client->setClientId(config('services.google.client_id'));
+        $this->client->setClientSecret(config('services.google.client_secret'));
+        $this->client->setRedirectUri(config('services.google.redirect_uri'));
+        $this->client->addScope(GoogleCalendar::CALENDAR_READONLY);
 
-        $optParams = [
-            'maxResults' => min($limit, 50),
-            'orderBy' => 'startTime',
-            'singleEvents' => true,
-            'q' => $query, // pencarian di title, description, attendees
-            'timeMin' => $timeMin ? Carbon::parse($timeMin)->toRfc3339String() : now()->subDays(7)->toRfc3339String(),
-        ];
+        if ($this->user->google_calendar_token) {
+            $accessToken = json_decode($this->user->google_calendar_token, true);
+            $this->client->setAccessToken($accessToken);
 
-        if ($timeMax) {
-            $optParams['timeMax'] = Carbon::parse($timeMax)->toRfc3339String();
-        }
-
-        try {
-            $results = $this->service->events->listEvents('primary', $optParams);
-
-            $events = [];
-            foreach ($results->getItems() as $event) {
-                $events[] = $this->formatEvent($event);
+            // Refresh token if expired
+            if ($this->client->isAccessTokenExpired()) {
+                if ($this->client->getRefreshToken()) {
+                    $newToken = $this->client->fetchAccessTokenWithRefreshToken();
+                    $this->user->update([
+                        'google_calendar_token' => json_encode($newToken)
+                    ]);
+                }
             }
-
-            return [
-                'count' => count($events),
-                'events' => $events,
-            ];
-        } catch (\Exception $e) {
-            Log::error('Calendar API error: ' . $e->getMessage());
-            return ['error' => 'Failed to fetch calendar events'];
         }
     }
 
-    private function formatEvent(Event $event): array
+    /**
+     * Sync calendar events
+     */
+    public function syncEvents(array $options = []): array
+    {
+        if (!$this->user->google_calendar_token) {
+            return [
+                'success' => false,
+                'message' => 'Google Calendar not connected',
+            ];
+        }
+
+        try {
+            $calendarService = new GoogleCalendar($this->client);
+            
+            // Default to sync last 30 days and next 90 days
+            $timeMin = $options['time_min'] ?? Carbon::now()->subDays(30)->toRfc3339String();
+            $timeMax = $options['time_max'] ?? Carbon::now()->addDays(90)->toRfc3339String();
+            $maxResults = $options['max_results'] ?? 250;
+
+            $params = [
+                'maxResults' => $maxResults,
+                'orderBy' => 'startTime',
+                'singleEvents' => true,
+                'timeMin' => $timeMin,
+                'timeMax' => $timeMax,
+            ];
+
+            // Get primary calendar events
+            $events = $calendarService->events->listEvents('primary', $params);
+            
+            $synced = 0;
+            $errors = 0;
+
+            foreach ($events->getItems() as $event) {
+                try {
+                    $this->storeEvent($event);
+                    $synced++;
+                } catch (\Exception $e) {
+                    Log::error('Failed to store calendar event', [
+                        'event_id' => $event->getId(),
+                        'error' => $e->getMessage(),
+                    ]);
+                    $errors++;
+                }
+            }
+
+            return [
+                'success' => true,
+                'synced' => $synced,
+                'errors' => $errors,
+                'total' => $events->count(),
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Calendar sync failed', [
+                'user_id' => $this->user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Failed to sync calendar: ' . $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Store a single event with embedding
+     */
+    protected function storeEvent($event): bool
     {
         $start = $event->start->dateTime ?? $event->start->date;
         $end = $event->end->dateTime ?? $event->end->date;
 
-        return [
+        // Extract attendees
+        $attendees = [];
+        if ($event->getAttendees()) {
+            foreach ($event->getAttendees() as $attendee) {
+                $attendees[] = $attendee->email;
+            }
+        }
+
+        $eventData = [
+            'user_id' => $this->user->id,
+            'event_id' => $event->getId(),
+            'calendar_id' => 'primary',
             'summary' => $event->getSummary() ?? '(No title)',
-            'start' => Carbon::parse($start)->format('Y-m-d H:i'),
-            'end' => Carbon::parse($end)->format('Y-m-d H:i'),
-            'location' => $event->getLocation() ?? null,
-            'description' => substr($event->getDescription() ?? '', 0, 300),
-            'attendees' => collect($event->getAttendees() ?? [])->pluck('email')->toArray(),
-            'hangoutLink' => $event->getHangoutLink() ?? null,
+            'description' => $event->getDescription(),
+            'location' => $event->getLocation(),
+            'start_datetime' => Carbon::parse($start)->toDateTimeString(),
+            'end_datetime' => Carbon::parse($end)->toDateTimeString(),
+            'attendees' => $attendees,
+            'status' => $event->getStatus() ?? 'confirmed',
+            'organizer_email' => $event->getOrganizer()?->email,
+            'organizer_name' => $event->getOrganizer()?->displayName,
+            'is_recurring' => !empty($event->getRecurringEventId()),
+            'recurring_event_id' => $event->getRecurringEventId(),
+            'html_link' => $event->getHtmlLink(),
         ];
+
+        return $this->embeddingService->storeEventWithEmbedding($eventData);
     }
 
     /**
-     * Create a new calendar event
+     * Get upcoming events from Google Calendar (live)
      */
-    public function createEvent(array $params): array
+    public function getUpcomingEvents(int $days = 7): array
     {
-        $summary = $params['summary'] ?? 'New Meeting';
-        $start = $params['start']; // ISO datetime, e.g. 2025-12-22T10:00:00+07:00
-        $end = $params['end'];     // ISO datetime
-        $attendees = $params['attendees'] ?? []; // array of email strings
-        $description = $params['description'] ?? null;
-        $location = $params['location'] ?? null;
-        $conference = $params['conference'] ?? true; // auto create Google Meet link?
+        if (!$this->user->google_calendar_token) {
+            return [];
+        }
 
         try {
-            $event = new \Google\Service\Calendar\Event([
-                'summary' => $summary,
-                'description' => $description,
-                'location' => $location,
-                'start' => [
-                    'dateTime' => $start,
-                    'timeZone' => 'Asia/Jakarta', // sesuaikan atau deteksi dari user
-                ],
-                'end' => [
-                    'dateTime' => $end,
-                    'timeZone' => 'Asia/Jakarta',
-                ],
-                'attendees' => array_map(fn($email) => ['email' => $email], $attendees),
-                'conferenceData' => $conference ? [
-                    'createRequest' => [
-                        'requestId' => 'rnd-' . uniqid(),
-                        'conferenceSolutionKey' => ['type' => 'hangoutsMeet'],
-                    ],
-                ] : null,
-                'reminders' => [
-                    'useDefault' => true,
-                ],
-            ]);
+            $calendarService = new GoogleCalendar($this->client);
+            
+            $timeMin = Carbon::now()->toRfc3339String();
+            $timeMax = Carbon::now()->addDays($days)->toRfc3339String();
 
-            $calendarId = 'primary';
-            $event = $this->service->events->insert($calendarId, $event, [
-                'conferenceDataVersion' => $conference ? 1 : 0,
-                'sendUpdates' => 'all', // kirim email invite ke attendees
-            ]);
-
-            return [
-                'success' => true,
-                'event_id' => $event->id,
-                'summary' => $event->summary,
-                'start' => Carbon::parse($event->start->dateTime)->format('Y-m-d H:i'),
-                'end' => Carbon::parse($event->end->dateTime)->format('Y-m-d H:i'),
-                'hangoutLink' => $event->hangoutsLink ?? null,
-                'htmlLink' => $event->htmlLink,
-                'message' => "Event '{$summary}' berhasil dibuat!",
+            $params = [
+                'maxResults' => 20,
+                'orderBy' => 'startTime',
+                'singleEvents' => true,
+                'timeMin' => $timeMin,
+                'timeMax' => $timeMax,
             ];
+
+            $events = $calendarService->events->listEvents('primary', $params);
+            
+            $result = [];
+            foreach ($events->getItems() as $event) {
+                $start = $event->start->dateTime ?? $event->start->date;
+                
+                $result[] = [
+                    'id' => $event->getId(),
+                    'summary' => $event->getSummary(),
+                    'start' => Carbon::parse($start)->toDateTimeString(),
+                    'location' => $event->getLocation(),
+                ];
+            }
+
+            return $result;
 
         } catch (\Exception $e) {
-            Log::error('Create calendar event failed: ' . $e->getMessage());
-            return [
-                'success' => false,
+            Log::error('Failed to fetch upcoming events', [
+                'user_id' => $this->user->id,
                 'error' => $e->getMessage(),
-            ];
+            ]);
+            return [];
         }
+    }
+
+    /**
+     * Check if calendar is connected
+     */
+    public function isConnected(): bool
+    {
+        return !empty($this->user->google_calendar_token);
     }
 }

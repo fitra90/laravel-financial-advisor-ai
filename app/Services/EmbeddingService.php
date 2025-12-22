@@ -325,4 +325,139 @@ class EmbeddingService
             return [];
         }
     }
+
+    /**
+     * Search similar calendar events using vector similarity
+     */
+    public function searchSimilarEvents(string $query, int $userId, int $limit = 5): array
+    {
+        $embedding = $this->generateEmbedding($query);
+        
+        if (!$embedding) {
+            return [];
+        }
+
+        $embeddingJson = json_encode($embedding);
+
+        $results = DB::select("
+            SELECT 
+                id,
+                event_id,
+                summary,
+                description,
+                location,
+                start_datetime,
+                end_datetime,
+                attendees,
+                (embedding <=> ?::vector) as distance
+            FROM calendar_events
+            WHERE user_id = ?
+            ORDER BY distance
+            LIMIT ?
+        ", [$embeddingJson, $userId, $limit]);
+
+        return array_map(function($row) {
+            $event = (array) $row;
+            // Parse attendees JSON if stored as JSON
+            if (!empty($event['attendees']) && is_string($event['attendees'])) {
+                $event['attendees'] = json_decode($event['attendees'], true);
+            }
+            return $event;
+        }, $results);
+    }
+
+    /**
+     * Search events by date range
+     */
+    public function searchEventsByDateRange(int $userId, string $startDate, string $endDate, int $limit = 50): array
+    {
+        $results = DB::select("
+            SELECT 
+                id,
+                event_id,
+                summary,
+                description,
+                location,
+                start_datetime,
+                end_datetime,
+                attendees
+            FROM calendar_events
+            WHERE user_id = ?
+            AND start_datetime >= ?
+            AND start_datetime <= ?
+            ORDER BY start_datetime ASC
+            LIMIT ?
+        ", [$userId, $startDate, $endDate, $limit]);
+
+        return array_map(function($row) {
+            $event = (array) $row;
+            if (!empty($event['attendees']) && is_string($event['attendees'])) {
+                $event['attendees'] = json_decode($event['attendees'], true);
+            }
+            return $event;
+        }, $results);
+    }
+
+    /**
+     * Store calendar event with embedding
+     */
+    public function storeEventWithEmbedding(array $eventData): bool
+    {
+        try {
+            // Create searchable text from event data
+            $searchableText = implode(' ', array_filter([
+                $eventData['summary'] ?? '',
+                $eventData['description'] ?? '',
+                $eventData['location'] ?? '',
+                is_array($eventData['attendees'] ?? null) 
+                    ? implode(' ', $eventData['attendees']) 
+                    : ($eventData['attendees'] ?? ''),
+            ]));
+
+            $embedding = $this->generateEmbedding($searchableText);
+            
+            if (!$embedding) {
+                return false;
+            }
+
+            $embeddingJson = json_encode($embedding);
+            $attendeesJson = is_array($eventData['attendees'] ?? null) 
+                ? json_encode($eventData['attendees']) 
+                : $eventData['attendees'];
+
+            DB::insert("
+                INSERT INTO calendar_events 
+                (user_id, event_id, summary, description, location, start_datetime, end_datetime, attendees, embedding, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::vector, NOW(), NOW())
+                ON CONFLICT (user_id, event_id) 
+                DO UPDATE SET
+                    summary = EXCLUDED.summary,
+                    description = EXCLUDED.description,
+                    location = EXCLUDED.location,
+                    start_datetime = EXCLUDED.start_datetime,
+                    end_datetime = EXCLUDED.end_datetime,
+                    attendees = EXCLUDED.attendees,
+                    embedding = EXCLUDED.embedding,
+                    updated_at = NOW()
+            ", [
+                $eventData['user_id'],
+                $eventData['event_id'],
+                $eventData['summary'] ?? null,
+                $eventData['description'] ?? null,
+                $eventData['location'] ?? null,
+                $eventData['start_datetime'],
+                $eventData['end_datetime'],
+                $attendeesJson,
+                $embeddingJson,
+            ]);
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to store event with embedding', [
+                'error' => $e->getMessage(),
+                'event_id' => $eventData['event_id'] ?? null,
+            ]);
+            return false;
+        }
+    }
 }
