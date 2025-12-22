@@ -1,0 +1,15 @@
+[build]
+builder = "nixpacks"
+buildCommand = "composer install --no-dev --optimize-autoloader && php artisan optimize"
+
+# Web Service
+[service.web]
+start = "php artisan serve --host=0.0.0.0 --port=${PORT}"
+
+# Queue Worker
+[service.worker]
+start = "php artisan queue:work --sleep=3 --tries=3 --timeout=300"
+
+# Scheduler (PENTING untuk scheduled jobs!)
+[service.scheduler]
+start = "php artisan schedule:work"

@@ -26,9 +26,10 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping()
             ->runInBackground();
 
-        // Cleanup old messages (optional)
-        $schedule->command('model:prune', ['--model' => 'App\\Models\\Message'])
-            ->daily();
+        // ================= DAILY CLEANUP =================
+        // Cleanup old jobs daily at 3 AM
+        $schedule->command('queue:prune-batches --hours=48')->dailyAt('03:00');
+        $schedule->command('queue:prune-failed-jobs --hours=72')->dailyAt('03:30');
     }
 
     protected function commands(): void
