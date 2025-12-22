@@ -232,43 +232,93 @@ class AgentService
 
     }
 
-   protected function extractText($response): string
-    {
-        if (!$response) {
-            return '';
-        }
+//    protected function extractText($response): string
+//     {
+//         if (!$response) {
+//             return '';
+//         }
 
-        try {
-            $text = '';
+//         try {
+//             $text = '';
             
-            // Handle if response is already a string
-            if (is_string($response)) {
-                return trim($response);
+//             // Handle if response is already a string
+//             if (is_string($response)) {
+//                 return trim($response);
+//             }
+
+//             // Try to get parts
+//             if (method_exists($response, 'parts')) {
+//                 foreach ($response->parts() as $part) {
+//                     if (isset($part->text) && is_string($part->text)) {
+//                         $text .= $part->text;
+//                     }
+//                 }
+//             }
+            
+//             // Try to get text directly
+//             if (empty($text) && method_exists($response, 'text')) {
+//                 $text = $response->text();
+//             }
+
+//             return trim($text);
+//         } catch (\Exception $e) {
+//             Log::error('Error in extractText', [
+//                 'error' => $e->getMessage(),
+//                 'response_type' => get_class($response)
+//             ]);
+//             return '';
+//         }
+//     }
+
+        protected function extractText($response): string
+        {
+            if (!$response) {
+                return '';
             }
 
-            // Try to get parts
-            if (method_exists($response, 'parts')) {
-                foreach ($response->parts() as $part) {
-                    if (isset($part->text) && is_string($part->text)) {
-                        $text .= $part->text;
+            try {
+                $text = '';
+                
+                // Handle if response is already a string
+                if (is_string($response)) {
+                    return trim($response);
+                }
+
+                // Try to get parts (for GenerateContentResponse objects)
+                if (method_exists($response, 'parts')) {
+                    foreach ($response->parts() as $part) {
+                        if (isset($part->text) && is_string($part->text)) {
+                            $text .= $part->text;
+                        }
                     }
                 }
-            }
-            
-            // Try to get text directly
-            if (empty($text) && method_exists($response, 'text')) {
-                $text = $response->text();
-            }
+                
+                // Try to get text directly from candidate
+                if (empty($text) && method_exists($response, 'candidates') && !empty($response->candidates())) {
+                    $candidate = $response->candidates()[0];
+                    if (method_exists($candidate, 'content') && $candidate->content()) {
+                        foreach ($candidate->content()->parts() as $part) {
+                            if (isset($part->text) && is_string($part->text)) {
+                                $text .= $part->text;
+                            }
+                        }
+                    }
+                }
 
-            return trim($text);
-        } catch (\Exception $e) {
-            Log::error('Error in extractText', [
-                'error' => $e->getMessage(),
-                'response_type' => get_class($response)
-            ]);
-            return '';
+                // Try to get text directly (legacy method)
+                if (empty($text) && method_exists($response, 'text')) {
+                    $text = $response->text();
+                }
+
+                return trim($text);
+            } catch (\Exception $e) {
+                Log::error('Error in extractText', [
+                    'error' => $e->getMessage(),
+                    'response_type' => get_class($response)
+                ]);
+                return '';
+            }
         }
-    }
 
     /**
      * Execute a tool function
@@ -300,7 +350,7 @@ class AgentService
                     if (!is_array($result)) {
                         $result = ['error' => 'Invalid response format'];
                     }
-                    
+
                     return $result; // Always array[file:1]
 
                 case 'add_contact_note':
@@ -559,16 +609,19 @@ class AgentService
                 ->get()
                 ->reverse();
 
-            // Build history in Gemini format
+            // Build history in Gemini format - FIXED
             $history = [];
             foreach ($messages as $msg) {
+                // Determine role correctly
+                $role = $msg->role === 'assistant' ? Role::MODEL : Role::USER;
+                
                 $history[] = Content::parse(
-                    part: $msg->content,
-                    role: $msg->role === 'assistant' ? Role::MODEL : Role::USER
+                    $msg->content,  // part (positional)
+                    $role           // role (positional)
                 );
             }
 
-            // Add system instruction
+            // Add system instruction - FIXED
             $systemInstruction = Content::parse($this->getSystemPrompt());
 
             // Create chat session with tools
@@ -618,7 +671,7 @@ class AgentService
                                 'result' => $result,
                             ];
 
-                            // Send function response immediately (one at a time)
+                            // Send function response
                             try {
                                 // Create FunctionResponse Part
                                 $functionResponsePart = new Part(
@@ -628,8 +681,13 @@ class AgentService
                                     )
                                 );
                                 
-                                // Send as message
-                                $response = $chat->sendMessage([$functionResponsePart]);
+                                // Send function response - WRAP IN CONTENT
+                                $functionResponseContent = new Content(
+                                    parts: [$functionResponsePart],
+                                    role: Role::USER
+                                );
+                                
+                                $response = $chat->sendMessage($functionResponseContent);
                             } catch (\Exception $e) {
                                 Log::error('Error sending function response', [
                                     'function' => $name,
