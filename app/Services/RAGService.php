@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Contact;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -59,6 +60,25 @@ class RAGService
         $context['summary'] = $this->formatContext($emails, $contacts, $events);
 
         return $context;
+    }
+
+    public function getAllContacts(int $limit = 50): array
+    {
+        try {
+            $contacts = Contact::where('user_id', $this->user->id)
+                ->orderBy('created_at', 'desc')
+                ->limit($limit)
+                ->get()
+                ->toArray();
+                
+            return $contacts;
+        } catch (\Exception $e) {
+            Log::error('Error getting all contacts', [
+                'user_id' => $this->user->id,
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
     }
 
     /**

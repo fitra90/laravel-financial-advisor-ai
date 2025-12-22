@@ -68,8 +68,23 @@ class AgentService
                     )
                 ),
                 new FunctionDeclaration(
+                    name: 'get_all_contacts',
+                    description: 'Get all contacts with their email addresses. Use this when user wants to invite multiple people to a meeting or needs to see all available contacts.',
+                    parameters: new Schema(
+                        type: DataType::OBJECT,
+                        properties: [
+                            'limit' => new Schema(
+                                type: DataType::INTEGER,
+                                nullable: true,
+                                description: 'Maximum number of contacts to return (default 50)'
+                            ),
+                        ],
+                        required: []
+                    )
+                ),
+                new FunctionDeclaration(
                     name: 'search_contacts',
-                    description: 'Search through Hubspot CRM contacts. Use this when the user asks about clients, contact information, or people in their CRM.',
+                    description: 'Search through Hubspot CRM contacts by name, email, company, or any search term. Use this when the user asks about specific clients, contact information, or people in their CRM. For getting ALL contacts at once (e.g., for inviting to meetings), use get_all_contacts instead.',
                     parameters: new Schema(
                         type: DataType::OBJECT,
                         properties: [
@@ -305,7 +320,10 @@ class AgentService
 
                 case 'create_calendar_event':
                     return $this->toolCreateCalendarEvent($arguments);
-                    
+                
+                case 'get_all_contacts':
+                    return $this->toolGetAllContacts($arguments);
+                
                 case 'search_calendar_events':
                     // return $this->toolSearchCalendarEvent($arguments);
                     $result = $this->toolSearchCalendarEvent($arguments);
@@ -349,6 +367,35 @@ class AgentService
                     'subject' => $email['subject'],
                     'date' => $email['email_date'],
                     'preview' => mb_substr($email['body_text'], 0, 300),
+                ];
+            }, $results),
+        ];
+    }
+
+    protected function toolGetAllContacts(array $args): array
+    {
+        $limit = $args['limit'] ?? 50;
+        
+        // Get contacts from RAG service or directly from database
+        $results = $this->ragService->getAllContacts($limit);
+        
+        // Or if RAGService doesn't have getAllContacts, do direct query:
+        // $contacts = \App\Models\Contact::where('user_id', $this->user->id)
+        //     ->limit($limit)
+        //     ->get()
+        //     ->toArray();
+
+        if (empty($results)) {
+            return ['message' => 'No contacts found'];
+        }
+
+        return [
+            'count' => count($results),
+            'contacts' => array_map(function($contact) {
+                return [
+                    'name' => trim(($contact['first_name'] ?? '') . ' ' . ($contact['last_name'] ?? '')),
+                    'email' => $contact['email'] ?? '',
+                    'company' => $contact['company'] ?? '',
                 ];
             }, $results),
         ];
@@ -879,22 +926,33 @@ class AgentService
         return "You are an AI assistant for a financial advisor named {$this->user->name}.
                 You have access to these tools:
                 - search_emails: Find information in emails
-                - search_contacts: Find client/contact information  
+                - search_contacts: Find client/contact information by name, company, or any search term
+                - get_all_contacts: Get ALL contacts with their email addresses (use this when user wants to see all contacts or invite multiple people)
                 - search_calendar_events: Find meetings and appointments
                 - create_calendar_event: Schedule new meetings/events
                 - send_email: Send emails
                 - create_hubspot_contact: Add new CRM contacts
                 - add_contact_note: Add notes to contacts
 
-                IMPORTANT for calendar queries:
-                - When user asks 'when is my meeting with X?' or 'do I have meeting with X?' 
-                → Use search_calendar_events with query='X' (the person's name)
-                - When user says 'schedule meeting', 'book call', 'create event'
-                → Use create_calendar_event
+                IMPORTANT WORKFLOW INSTRUCTIONS:
+                
+                1. When user asks to schedule a meeting or create an event:
+                - FIRST use 'get_all_contacts' to see available contacts
+                - Then ask user to select which contacts to invite
+                - OR use 'search_contacts' if they mention specific names
+                
+                2. For calendar queries:
+                - When user asks 'when is my meeting with X?' → Use search_calendar_events with query='X'
+                - When user says 'schedule meeting', 'book call', 'create event' → Use create_calendar_event
+                
+                3. Proactive behavior:
+                - If user mentions multiple people, automatically get all contacts first
+                - Suggest specific contacts based on context
+                - Ask clarifying questions: 'Who would you like to invite? I can show you all available contacts.'
 
                 Current date: " . now()->toDateString() . "
                 Current time: " . now()->toTimeString() . "
 
-                Be helpful, proactive, and provide clear summaries of search results.";
+                Be helpful, proactive, and provide clear summaries. Always suggest next steps.";
     }
 }
