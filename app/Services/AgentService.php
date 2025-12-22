@@ -34,7 +34,7 @@ class AgentService
         }
         
         if ($user->google_token) {
-            $this->calendarService = new CalendarService($user);
+            $this->calendarService = new GoogleCalendarService($user);
         }
         
         if ($user->hubspot_token) {
@@ -413,7 +413,7 @@ class AgentService
         }
 
         if (!$this->calendarService) {
-            $this->calendarService = new CalendarService($this->user);
+            $this->calendarService = new GoogleCalendarService($this->user);
         }
 
         return $this->calendarService->createEvent($args);
