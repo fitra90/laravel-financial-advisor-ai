@@ -160,7 +160,7 @@ class AdvancedChat extends Component
 
         // From Hubspot contacts
         // $contacts = $user->contacts->limit(50)->get();
-        $contacts = $user->contacts->sortByDesc('created_at')->take(10)->get();
+        $contacts = $user->contacts->all();
         foreach ($contacts as $contact) {
             if ($contact->email) {
                 Mention::updateOrCreate(
