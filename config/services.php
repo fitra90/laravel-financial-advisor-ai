@@ -40,13 +40,26 @@ return [
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URL'),
         'scopes' => [
+            // Email & Profile (untuk OAuth login)
             'https://www.googleapis.com/auth/userinfo.email',
             'https://www.googleapis.com/auth/userinfo.profile',
+            
+            // Calendar FULL access
             'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/calendar.events',
+            
+            // Gmail (jika perlu)
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.send',
+            'https://www.googleapis.com/auth/gmail.modify',
         ],
-        'with' => ['access_type' => 'offline', 'prompt' => 'consent'],
-        ],
-    
+        // APPROVAL refresh_token
+        'approval_prompt' => 'force', // Penting untuk dapat refresh_token
+        'access_type' => 'offline',   // Penting untuk dapat refresh_token
+        
+        'prompt' => 'consent select_account',
+    ],
+
     'hubspot' => [
         'client_id' => env('HUBSPOT_CLIENT_ID'),
         'client_secret' => env('HUBSPOT_CLIENT_SECRET'),
