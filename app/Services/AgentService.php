@@ -232,93 +232,55 @@ class AgentService
 
     }
 
-//    protected function extractText($response): string
-//     {
-//         if (!$response) {
-//             return '';
-//         }
+    protected function extractText($response): string
+    {
+        if (!$response) {
+            return '';
+        }
 
-//         try {
-//             $text = '';
+        try {
+            $text = '';
             
-//             // Handle if response is already a string
-//             if (is_string($response)) {
-//                 return trim($response);
-//             }
-
-//             // Try to get parts
-//             if (method_exists($response, 'parts')) {
-//                 foreach ($response->parts() as $part) {
-//                     if (isset($part->text) && is_string($part->text)) {
-//                         $text .= $part->text;
-//                     }
-//                 }
-//             }
-            
-//             // Try to get text directly
-//             if (empty($text) && method_exists($response, 'text')) {
-//                 $text = $response->text();
-//             }
-
-//             return trim($text);
-//         } catch (\Exception $e) {
-//             Log::error('Error in extractText', [
-//                 'error' => $e->getMessage(),
-//                 'response_type' => get_class($response)
-//             ]);
-//             return '';
-//         }
-//     }
-
-        protected function extractText($response): string
-        {
-            if (!$response) {
-                return '';
+            // Handle if response is already a string
+            if (is_string($response)) {
+                return trim($response);
             }
 
-            try {
-                $text = '';
-                
-                // Handle if response is already a string
-                if (is_string($response)) {
-                    return trim($response);
+            // Try to get parts (for GenerateContentResponse objects)
+            if (method_exists($response, 'parts')) {
+                foreach ($response->parts() as $part) {
+                    if (isset($part->text) && is_string($part->text)) {
+                        $text .= $part->text;
+                    }
                 }
-
-                // Try to get parts (for GenerateContentResponse objects)
-                if (method_exists($response, 'parts')) {
-                    foreach ($response->parts() as $part) {
+            }
+            
+            // Try to get text directly from candidate
+            if (empty($text) && method_exists($response, 'candidates') && !empty($response->candidates())) {
+                $candidate = $response->candidates()[0];
+                if (method_exists($candidate, 'content') && $candidate->content()) {
+                    foreach ($candidate->content()->parts() as $part) {
                         if (isset($part->text) && is_string($part->text)) {
                             $text .= $part->text;
                         }
                     }
                 }
-                
-                // Try to get text directly from candidate
-                if (empty($text) && method_exists($response, 'candidates') && !empty($response->candidates())) {
-                    $candidate = $response->candidates()[0];
-                    if (method_exists($candidate, 'content') && $candidate->content()) {
-                        foreach ($candidate->content()->parts() as $part) {
-                            if (isset($part->text) && is_string($part->text)) {
-                                $text .= $part->text;
-                            }
-                        }
-                    }
-                }
-
-                // Try to get text directly (legacy method)
-                if (empty($text) && method_exists($response, 'text')) {
-                    $text = $response->text();
-                }
-
-                return trim($text);
-            } catch (\Exception $e) {
-                Log::error('Error in extractText', [
-                    'error' => $e->getMessage(),
-                    'response_type' => get_class($response)
-                ]);
-                return '';
             }
+
+            // Try to get text directly (legacy method)
+            if (empty($text) && method_exists($response, 'text')) {
+                $text = $response->text();
+            }
+
+            return trim($text);
+        } catch (\Exception $e) {
+            Log::error('Error in extractText', [
+                'error' => $e->getMessage(),
+                'response_type' => get_class($response)
+            ]);
+            return '';
         }
+    }
 
     /**
      * Execute a tool function
@@ -505,99 +467,6 @@ class AgentService
 
         return $this->calendarService->createEvent($args);
     }
-
-    // public function chat(string $userMessage): array
-    // {
-    //     try {
-    //         // Ambil history chat (maksimal 10 pesan terakhir untuk konteks)
-    //         $messages = Message::where('user_id', $this->user->id)
-    //             ->latest()
-    //             ->take(10)
-    //             ->get()
-    //             ->reverse();
-
-    //         // Bangun history dalam format Gemini
-    //         $history = [];
-    //         foreach ($messages as $msg) {
-    //             $history[] = Content::parse(
-    //                 part: $msg->content,
-    //                 role: $msg->role === 'assistant' ? Role::MODEL : Role::USER
-    //             );
-    //         }
-
-    //         // Tambahkan system instruction
-    //         $systemInstruction = Content::parse($this->getSystemPrompt());
-
-    //         // Buat chat session dengan tools
-    //         $chat = Gemini::generativeModel(model: $this->model)
-    //             ->withSystemInstruction($systemInstruction)
-    //             ->withTool($this->getTools())
-    //             ->startChat(history: $history);
-
-    //         // Kirim pesan user
-    //         $response = $chat->sendMessage($userMessage);
-
-    //         // Setelah $response = $chat->sendMessage($userMessage);
-
-    //         $toolCalls = [];
-
-    //         foreach ($response->parts() as $part) {
-    //             if ($functionCall = $part->functionCall) {
-    //                 $name = $functionCall->name;
-    //                 $args = (array) $functionCall->args;
-
-    //                 $result = $this->executeTool($name, $args);
-
-    //                 $toolCalls[] = [
-    //                     'tool' => $name,
-    //                     'args' => $args,
-    //                     'result' => $result,
-    //                 ];
-
-    //                 // Kirim function response
-    //                 $chat->sendMessage([
-    //                     new Part(
-    //                         functionResponse: new FunctionResponse(
-    //                             name: $name,
-    //                             response: $result
-    //                         )
-    //                     )
-    //                 ]);
-    //             }
-    //         }
-            
-    //         $finalResponse = $chat->sendMessage([]); // kirim array kosong → trigger final generation
-
-    //         $finalText = $this->extractText($finalResponse);
-
-    //         // Simpan respons assistant
-    //         Message::create([
-    //             'user_id' => $this->user->id,
-    //             'role' => 'assistant',
-    //             'content' => $finalText,
-    //             'metadata' => [
-    //                 'model' => $this->model,
-    //                 'tool_calls' => $toolCalls,
-    //             ],
-    //         ]);
-
-    //         return [
-    //             'content' => $finalText ?: 'No response generated.',
-    //             'tool_calls' => $toolCalls,
-    //         ];
-
-    //     } catch (\Exception $e) {
-    //         Log::error('AgentService chat error: ' . $e->getMessage(), [
-    //             'trace' => $e->getTraceAsString()
-    //         ]);
-
-    //         return [
-    //             // 'content' => 'Maaf, terjadi kesalahan teknis. Silakan coba lagi.',
-    //             'content' => $e->getMessage(),
-    //             'error' => true,
-    //         ];
-    //     }
-    // }
 
     public function chat(string $userMessage): array
     {
